@@ -28,7 +28,8 @@ import {
 import { format, parseISO } from "date-fns";
 import { analyticsService } from "@/services/analyticsService";
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/Card";
-import { Badge, severityToTone } from "@/components/ui/Badge";
+import { Badge } from "@/components/ui/Badge";
+import { severityToTone } from "@/components/ui/badgeUtils";
 import { Spinner } from "@/components/ui/Spinner";
 import type { Severity } from "@/types";
 

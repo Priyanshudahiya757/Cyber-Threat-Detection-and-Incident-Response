@@ -15,20 +15,11 @@
  *     components use that hook, never this context directly.
  *   - src/routes/ProtectedRoute.tsx gates routes on isAuthenticated
  */
-import { createContext, useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { authService } from "@/services/authService";
 import { tokenStorage } from "@/api/tokenStorage";
+import { AuthContext } from "./AuthContextValue";
 import type { LoginRequest, UserPublic } from "@/types";
-
-export interface AuthContextValue {
-  user: UserPublic | null;
-  isAuthenticated: boolean;
-  isInitializing: boolean;
-  login: (credentials: LoginRequest, remember: boolean) => Promise<void>;
-  logout: () => void;
-}
-
-export const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<UserPublic | null>(null);

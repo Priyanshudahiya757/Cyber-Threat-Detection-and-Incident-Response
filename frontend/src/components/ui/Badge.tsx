@@ -10,9 +10,7 @@
  */
 import type { HTMLAttributes } from "react";
 import { cn } from "@/lib/cn";
-import type { Severity } from "@/types";
-
-type BadgeTone = Severity | "warning" | "info" | "neutral" | "success";
+import type { BadgeTone } from "./badgeUtils";
 
 interface BadgeProps extends HTMLAttributes<HTMLSpanElement> {
   tone: BadgeTone;
@@ -53,9 +51,4 @@ export function Badge({ tone, className, children, ...props }: BadgeProps) {
       {children ?? toneLabels[tone]}
     </span>
   );
-}
-
-/** Maps a backend Severity value onto the Badge's tone prop — small but avoids repeated ternaries everywhere. */
-export function severityToTone(severity: Severity): BadgeTone {
-  return severity;
 }

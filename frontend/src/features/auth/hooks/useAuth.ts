@@ -7,7 +7,8 @@
  *   if used outside AuthProvider (a real bug, not a silent undefined).
  */
 import { useContext } from "react";
-import { AuthContext, type AuthContextValue } from "../context/AuthContext";
+import { AuthContext } from "../context/AuthContextValue";
+import type { AuthContextValue } from "../context/AuthContextValue";
 
 export function useAuth(): AuthContextValue {
   const context = useContext(AuthContext);

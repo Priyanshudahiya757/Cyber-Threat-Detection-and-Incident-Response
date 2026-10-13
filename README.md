@@ -5,18 +5,17 @@
 The working application is here:
 
 ```text
-cyber-threat-dashboard-full/cyber-threat-dashboard/
+backend/
+frontend/
 ```
 
-**Full installation, Docker, seeding, demo, and troubleshooting instructions:**
-
-→ **[cyber-threat-dashboard-full/cyber-threat-dashboard/README.md](cyber-threat-dashboard-full/cyber-threat-dashboard/README.md)**
+**Installation, Docker, seeding, demo, and troubleshooting instructions** are documented in
+[`docs/ROADMAP.md`](docs/ROADMAP.md) and [`docs/RELEASE_CHECKLIST.md`](docs/RELEASE_CHECKLIST.md).
 
 ### Quick start
 
 ```bash
-cd cyber-threat-dashboard-full/cyber-threat-dashboard
-cp backend/.env.example backend/.env
+Copy-Item backend/.env.example backend/.env
 # Set JWT_SECRET_KEY in backend/.env
 
 docker compose up -d --build
@@ -24,9 +23,6 @@ docker compose exec backend python scripts/seed_admin.py
 docker compose exec backend python scripts/seed_demo_data.py
 ```
 
-- UI: http://localhost:5173  
-- API docs: http://localhost:8000/docs  
-- Login: `admin` / `ChangeMe123!` (after seed)
 
 ### Other files in this folder
 
