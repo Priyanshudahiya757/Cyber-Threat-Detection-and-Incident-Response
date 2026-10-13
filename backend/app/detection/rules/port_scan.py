@@ -13,7 +13,7 @@ MITRE ATT&CK:
 from collections import defaultdict
 from typing import Dict, List, Tuple
 
-from app.detection.rules.base_rule import BaseRule, RuleConfig, window_seconds
+from app.detection.rules.base_rule import BaseRule, IntSetting, window_seconds
 from app.models.detection_schema import DetectionEngine, DetectionEvent, Entity, EntityType
 from app.models.log_schema import NormalizedLog, Severity, SourceType
 
@@ -23,13 +23,10 @@ class PortScanRule(BaseRule):
     description = "Single source IP denied across many distinct destination ports on one host in a short window."
     mitre_technique = "T1046 - Network Service Discovery"
 
-    DEFAULT_DISTINCT_PORT_THRESHOLD = 5
-    DEFAULT_WINDOW_SECONDS = 60
-
-    def __init__(self, config: RuleConfig = None, enabled: bool = True):
-        super().__init__(config, enabled)
-        self.port_threshold = self.config.get("distinct_port_threshold", self.DEFAULT_DISTINCT_PORT_THRESHOLD)
-        self.window = self.config.get("window_seconds", self.DEFAULT_WINDOW_SECONDS)
+    settings = {
+        "distinct_port_threshold": IntSetting(default=5, minimum=2, maximum=65_535),
+        "window_seconds": IntSetting(default=60, minimum=5, maximum=86_400),
+    }
 
     def evaluate(self, logs: List[NormalizedLog]) -> List[DetectionEvent]:
         candidates = [
@@ -51,18 +48,20 @@ class PortScanRule(BaseRule):
         for log in candidates:
             grouped[(log.source_ip, log.dest_ip)].append(log)
 
+        port_threshold, window = self.config["distinct_port_threshold"], self.config["window_seconds"]
+
         detections: List[DetectionEvent] = []
         for (source_ip, dest_ip), group_logs in grouped.items():
             distinct_ports = sorted({log.dest_port for log in group_logs})
-            if len(distinct_ports) < self.port_threshold:
+            if len(distinct_ports) < port_threshold:
                 continue
 
             span = window_seconds(group_logs)
-            if span > self.window and len(distinct_ports) < self.port_threshold * 2:
+            if span > window and len(distinct_ports) < port_threshold * 2:
                 continue
 
-            confidence = min(1.0, 0.5 + 0.05 * (len(distinct_ports) - self.port_threshold))
-            severity = Severity.HIGH if len(distinct_ports) >= self.port_threshold * 2 else Severity.MEDIUM
+            confidence = min(1.0, 0.5 + 0.05 * (len(distinct_ports) - port_threshold))
+            severity = Severity.HIGH if len(distinct_ports) >= port_threshold * 2 else Severity.MEDIUM
 
             detections.append(
                 DetectionEvent(

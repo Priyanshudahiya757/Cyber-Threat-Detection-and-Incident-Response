@@ -1,24 +1,18 @@
 /**
  * src/types/analytics.types.ts
- *
- * Purpose:
- *   Shapes for the Dashboard and Analytics pages. backend/app/api/v1/
- *   analytics.py currently returns 501 for /summary, /top-ips, and
- *   /severity-distribution (implementation lands once ingestion volume
- *   exists to aggregate — see that file's own docstring). The two
- *   underlying Elasticsearch aggregation functions it will eventually
- *   call already exist (db/elastic.py::aggregate_top_ips /
- *   aggregate_severity_counts), so these shapes are modeled directly on
- *   what those functions already return, not guessed at.
+ * Response shapes of backend/app/api/v1/analytics.py.
  */
+import type { SourceType } from "./common.types";
 
 export interface DashboardSummary {
   total_logs: number;
+  log_sources: number;
+  logs_by_source: Partial<Record<SourceType, number>>;
   threats_detected: number;
+  ai_anomalies: number;
   active_incidents: number;
   critical_alerts: number;
-  ai_anomalies: number;
-  log_sources: number;
+  unacknowledged_alerts: number;
 }
 
 export interface TopIpEntry {
@@ -44,10 +38,8 @@ export interface AttackTypeEntry {
   mitre_technique: string;
 }
 
-export interface SystemHealthStatus {
-  ingestion_pipeline: "healthy" | "degraded" | "down";
-  rule_engine: "healthy" | "degraded" | "down";
-  ml_engine: "healthy" | "degraded" | "down";
-  elasticsearch: "healthy" | "degraded" | "down";
-  mongodb: "healthy" | "degraded" | "down";
+export interface SystemHealth {
+  status: "ready" | "degraded";
+  version: string;
+  checks: Record<string, string>;
 }

@@ -2,67 +2,88 @@
 app/api/v1/auth.py
 
 Purpose:
-    Authentication endpoints: login (issues JWT access + refresh tokens),
-    token refresh, admin-only user registration, and "who am I".
+    Session endpoints: login (issues JWT access + refresh tokens), token
+    refresh, logout, "who am I", and changing one's own password.
+    Account administration lives in api/v1/users.py.
+
+    Security behaviour:
+      - Repeated failed logins lock the username (core/login_guard.py).
+      - Refresh tokens are single-use: exchanging one revokes it, and
+        logout revokes the one the client holds.
+      - Changing a password invalidates every token issued before it.
 
 Connects to:
     - core/security.py for password verification and token creation
-    - db/mongo.py for user lookup/creation
-    - core/dependencies.py for get_current_user / require_role on
-      protected routes (registration is admin-only)
+    - core/login_guard.py for brute-force lockout
+    - db/mongo.py for user lookup and token revocation
     - Mounted in main.py under /api/v1/auth
 """
-from fastapi import APIRouter, Depends, HTTPException, status
+from datetime import datetime
 
-from app.core.dependencies import get_current_user, require_role
-from app.core.logging_config import get_audit_logger, get_logger
+from fastapi import APIRouter, Depends, HTTPException, Response, status
+
+from app.core import login_guard
+from app.core.dependencies import get_current_user
+from app.core.logging_config import audit_event
 from app.core.security import (
+    REFRESH_TOKEN,
     TokenError,
     create_access_token,
     create_refresh_token,
     decode_token,
     hash_password,
+    issued_before,
+    token_expiry,
     verify_password,
 )
-from app.db.mongo import (
-    create_user,
-    get_user_by_email,
-    get_user_by_username,
-    update_last_login,
-)
+from app.db import mongo
 from app.models.user_schema import (
+    ChangePasswordRequest,
     LoginRequest,
     RefreshRequest,
     TokenResponse,
-    UserCreate,
     UserInDB,
     UserPublic,
-    UserRole,
 )
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
-logger = get_logger(__name__)
-audit = get_audit_logger()
+
+#: A bcrypt hash of a random value, verified against when the username
+#: doesn't exist so unknown and known usernames take the same time.
+_DUMMY_HASH = hash_password("timing-equalisation-placeholder")
 
 
-def _to_public(user: UserInDB) -> UserPublic:
-    return UserPublic(
-        id=user.id,
-        username=user.username,
-        email=user.email,
-        role=user.role,
-        is_active=user.is_active,
-        created_at=user.created_at,
-        last_login=user.last_login,
+def _issue_tokens(user: UserInDB) -> TokenResponse:
+    return TokenResponse(
+        access_token=create_access_token(subject=user.username, role=user.role.value),
+        refresh_token=create_refresh_token(subject=user.username, role=user.role.value),
+        user=user.to_public(),
+    )
+
+
+def _locked_response(until: datetime) -> HTTPException:
+    retry_after = max(1, int((until - mongo.utcnow()).total_seconds()))
+    return HTTPException(
+        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+        detail="Too many failed login attempts. Try again later.",
+        headers={"Retry-After": str(retry_after)},
     )
 
 
 @router.post("/login", response_model=TokenResponse)
 async def login(credentials: LoginRequest):
-    user = await get_user_by_username(credentials.username)
+    locked = await login_guard.locked_until(credentials.username)
+    if locked:
+        raise _locked_response(locked)
 
-    if user is None or not verify_password(credentials.password, user.hashed_password):
-        audit.info(f'{{"event": "login_failed", "username": "{credentials.username}"}}')
+    user = await mongo.get_user_by_username(credentials.username)
+    password_ok = verify_password(credentials.password, user.hashed_password if user else _DUMMY_HASH)
+
+    if user is None or not password_ok:
+        locked = await login_guard.register_failure(credentials.username)
+        audit_event("login_failed", username=credentials.username, locked=locked is not None)
+        if locked:
+            raise _locked_response(locked)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect username or password",
@@ -71,65 +92,71 @@ async def login(credentials: LoginRequest):
     if not user.is_active:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account is disabled")
 
-    access_token = create_access_token(subject=user.username, role=user.role)
-    refresh_token = create_refresh_token(subject=user.username, role=user.role)
-    await update_last_login(user.username)
+    await login_guard.register_success(user.username)
+    await mongo.update_last_login(user.username)
+    audit_event("login_success", username=user.username, role=user.role.value)
+    return _issue_tokens(user)
 
-    audit.info(f'{{"event": "login_success", "username": "{user.username}", "role": "{user.role}"}}')
 
-    return TokenResponse(
-        access_token=access_token,
-        refresh_token=refresh_token,
-        user=_to_public(user),
-    )
+async def _user_for_refresh_token(token: str) -> tuple[UserInDB, dict]:
+    """Validate a refresh token and return its user and decoded payload, or raise 401."""
+    invalid = HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token")
+    try:
+        payload = decode_token(token, expected_type=REFRESH_TOKEN)
+    except TokenError:
+        raise invalid
+
+    if await mongo.is_token_revoked(payload.get("jti", "")):
+        raise invalid
+
+    user = await mongo.get_user_by_username(payload["sub"])
+    if user is None or not user.is_active or issued_before(payload, user.token_valid_after):
+        raise invalid
+    return user, payload
 
 
 @router.post("/refresh", response_model=TokenResponse)
-async def refresh_token(payload: RefreshRequest):
+async def refresh_token(body: RefreshRequest):
+    user, payload = await _user_for_refresh_token(body.refresh_token)
+    # Rotation: the presented refresh token is spent the moment it is exchanged.
+    await mongo.revoke_token(payload["jti"], token_expiry(payload))
+    return _issue_tokens(user)
+
+
+@router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
+async def logout(body: RefreshRequest):
+    """
+    Revoke the client's refresh token. Always answers 204 — an invalid or
+    already-expired token simply has nothing left to revoke.
+    """
     try:
-        decoded = decode_token(payload.refresh_token, expected_type="refresh")
+        payload = decode_token(body.refresh_token, expected_type=REFRESH_TOKEN)
     except TokenError:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token")
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
 
-    user = await get_user_by_username(decoded["sub"])
-    if user is None or not user.is_active:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User no longer valid")
-
-    new_access = create_access_token(subject=user.username, role=user.role)
-    new_refresh = create_refresh_token(subject=user.username, role=user.role)
-
-    return TokenResponse(access_token=new_access, refresh_token=new_refresh, user=_to_public(user))
-
-
-@router.post("/register", response_model=UserPublic, status_code=status.HTTP_201_CREATED)
-async def register_user(
-    new_user: UserCreate,
-    current_user: UserInDB = Depends(require_role(UserRole.ADMIN)),
-):
-    """
-    Admin-only. SOC analysts cannot self-register or create other accounts —
-    account provisioning is deliberately centralized for auditability.
-    """
-    if await get_user_by_username(new_user.username):
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Username already exists")
-    if await get_user_by_email(new_user.email):
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered")
-
-    hashed = hash_password(new_user.password)
-    created = await create_user(
-        username=new_user.username,
-        email=new_user.email,
-        hashed_password=hashed,
-        role=new_user.role.value,
-    )
-
-    audit.info(
-        f'{{"event": "user_created", "username": "{created.username}", '
-        f'"role": "{created.role}", "created_by": "{current_user.username}"}}'
-    )
-    return _to_public(created)
+    await mongo.revoke_token(payload["jti"], token_expiry(payload))
+    audit_event("logout", username=payload["sub"])
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get("/me", response_model=UserPublic)
 async def get_me(current_user: UserInDB = Depends(get_current_user)):
-    return _to_public(current_user)
+    return current_user.to_public()
+
+
+@router.post("/change-password", response_model=TokenResponse)
+async def change_password(body: ChangePasswordRequest, current_user: UserInDB = Depends(get_current_user)):
+    """
+    Change the caller's own password. All existing sessions are signed
+    out; a fresh token pair is returned so the current one continues.
+    """
+    if not verify_password(body.current_password, current_user.hashed_password):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Current password is incorrect")
+    if body.new_password == body.current_password:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="New password must differ from the current one"
+        )
+
+    await mongo.set_user_password(current_user.username, hash_password(body.new_password))
+    audit_event("password_changed", username=current_user.username)
+    return _issue_tokens(current_user)

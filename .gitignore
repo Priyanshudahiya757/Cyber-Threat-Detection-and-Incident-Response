@@ -10,14 +10,15 @@ venv/
 .env
 !.env.example
 
-# Logs
+# Runtime logs (sample_logs/*.log are demo fixtures and stay tracked)
 backend/logs/
-*.log
 
-# ML artifacts (large binaries, don't commit)
-ml/models/*.pkl
+# Trained model artifacts are produced at runtime, not committed
+ml/models/*
+!ml/models/.gitkeep
+backend/ml/
 
-# Node / frontend (Phase 3+)
+# Node / frontend
 node_modules/
 frontend/dist/
 **/dist/

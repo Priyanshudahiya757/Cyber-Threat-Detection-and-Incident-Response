@@ -3,36 +3,44 @@
  *
  * Purpose:
  *   Single source of truth for backend route paths, mirroring
- *   backend/app/main.py's router registration exactly (prefix
- *   /api/v1, one router per bounded context). Every service module
- *   imports paths from here instead of inlining strings, so a backend
- *   route rename only needs updating in one place.
+ *   backend/app/main.py's router registration (prefix /api/v1, one
+ *   router per bounded context). Every service module imports paths
+ *   from here instead of inlining strings, so a backend route rename
+ *   only needs updating in one place.
  */
-
 export const ENDPOINTS = {
   auth: {
     login: "/auth/login",
     refresh: "/auth/refresh",
-    register: "/auth/register",
+    logout: "/auth/logout",
     me: "/auth/me",
+    changePassword: "/auth/change-password",
+  },
+  users: {
+    list: "/users",
+    assignable: "/users/assignable",
+    detail: (username: string) => `/users/${encodeURIComponent(username)}`,
+    resetPassword: (username: string) => `/users/${encodeURIComponent(username)}/reset-password`,
   },
   logs: {
     upload: "/logs/upload",
-    ingest: "/logs/ingest",
     search: "/logs/search",
     batches: "/logs/batches",
   },
   detections: {
     list: "/detections",
-    alerts: "/detections/alerts",
-    rules: "/detections/rules",
     run: "/detections/run",
+  },
+  alerts: {
+    list: "/alerts",
+    channels: "/alerts/channels",
+    test: "/alerts/test",
+    acknowledge: (id: string) => `/alerts/${id}/acknowledge`,
   },
   ml: {
     train: "/ml/train",
     predict: "/ml/predict",
     models: "/ml/models",
-    latestModel: "/ml/models/latest",
     evaluate: "/ml/evaluate",
   },
   incidents: {

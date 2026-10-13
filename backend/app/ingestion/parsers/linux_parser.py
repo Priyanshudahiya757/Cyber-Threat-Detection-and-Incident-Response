@@ -19,7 +19,7 @@ Connects to:
     - Registered in ingestion/pipeline.py under SourceType.LINUX
 """
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 
 from app.core.logging_config import get_logger
@@ -28,9 +28,8 @@ from app.models.log_schema import EventCategory, SourceType
 
 logger = get_logger(__name__)
 
-# Standard syslog timestamp has no year (e.g. "Jul 18 09:12:03"); we assume
-# the current year at parse time. This is a known limitation of classic
-# syslog format and is called out in docs/architecture.md as a v1 constraint.
+# Standard syslog timestamps carry no year (e.g. "Jul 18 09:12:03"), so the
+# year is inferred at parse time — see _parse_syslog_timestamp.
 _SYSLOG_TS_RE = r"(?P<ts>\w{3}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2})"
 
 _FAILED_PASSWORD_RE = re.compile(
@@ -58,8 +57,13 @@ def _parse_syslog_timestamp(ts_str: str) -> datetime:
     padding, so we normalize before strptime.
     """
     normalized = re.sub(r"\s+", " ", ts_str.strip())
-    current_year = datetime.now(timezone.utc).year
-    return datetime.strptime(f"{current_year} {normalized}", "%Y %b %d %H:%M:%S")
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    parsed = datetime.strptime(f"{now.year} {normalized}", "%Y %b %d %H:%M:%S")
+    if parsed > now + timedelta(days=1):
+        # A date that would lie in the future was logged last year
+        # (e.g. a "Dec 30" line read in January).
+        parsed = parsed.replace(year=now.year - 1)
+    return parsed
 
 
 class LinuxAuthLogParser(BaseLogParser):

@@ -10,10 +10,12 @@
  *   like an enterprise SIEM.
  */
 import { NavLink } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
 import { ShieldCheck, X } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { NAV_ITEMS } from "./navConfig";
 import { useAuth } from "@/features/auth/hooks/useAuth";
+import { fetchSystemHealth, HEALTH_QUERY_KEY } from "@/services/healthService";
 
 interface SidebarProps {
   /** Controls off-canvas visibility on small screens (<lg). Always visible at lg+. */
@@ -21,8 +23,29 @@ interface SidebarProps {
   onMobileClose: () => void;
 }
 
+type HealthTone = "ok" | "degraded" | "down";
+
+const HEALTH_DOT: Record<HealthTone, string> = {
+  ok: "bg-severity-success",
+  degraded: "bg-severity-warning",
+  down: "bg-severity-critical",
+};
+
 export function Sidebar({ isMobileOpen, onMobileClose }: SidebarProps) {
   const { user } = useAuth();
+
+  const healthQuery = useQuery({
+    queryKey: HEALTH_QUERY_KEY,
+    queryFn: fetchSystemHealth,
+    retry: false,
+    refetchInterval: 30_000,
+  });
+  const version = healthQuery.data ? `v${healthQuery.data.version} · ` : "";
+  const health: { tone: HealthTone; label: string } = healthQuery.isError
+    ? { tone: "down", label: "backend unreachable" }
+    : healthQuery.data?.status === "degraded"
+      ? { tone: "degraded", label: `${version}degraded` }
+      : { tone: "ok", label: healthQuery.data ? `${version}all systems ready` : "checking…" };
 
   const visibleItems = NAV_ITEMS.filter(
     (item) => !item.restrictedTo || (user && item.restrictedTo.includes(user.role))
@@ -100,10 +123,12 @@ export function Sidebar({ isMobileOpen, onMobileClose }: SidebarProps) {
         <div className="border-t border-border px-5 py-4">
           <div className="flex items-center gap-2 font-data text-2xs text-text-muted">
             <span className="relative flex h-1.5 w-1.5">
-              <span className="absolute inline-flex h-full w-full animate-ping-slow rounded-full bg-severity-success opacity-60" />
-              <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-severity-success" />
+              {health.tone === "ok" && (
+                <span className="absolute inline-flex h-full w-full animate-ping-slow rounded-full bg-severity-success opacity-60" />
+              )}
+              <span className={cn("relative inline-flex h-1.5 w-1.5 rounded-full", HEALTH_DOT[health.tone])} />
             </span>
-            v0.1.0 · connected
+            {health.label}
           </div>
         </div>
       </aside>

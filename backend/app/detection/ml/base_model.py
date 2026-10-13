@@ -65,6 +65,25 @@ class AnomalyModel(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    def risk_scores(self, X: np.ndarray) -> np.ndarray:
+        """
+        Return a risk value in [0, 100] per sample, HIGHER meaning MORE
+        anomalous, with 50 at the model's anomaly boundary. The scale is
+        fixed when the model is trained, so the same sample gets the same
+        risk no matter which other samples it is scored alongside.
+        """
+        raise NotImplementedError
+
+    @abstractmethod
+    def feature_deviations(self, X: np.ndarray) -> np.ndarray:
+        """
+        Return an array shaped like X giving how far each feature value
+        sits from what the model saw in training, in standard deviations.
+        Used to explain *why* a sample was flagged.
+        """
+        raise NotImplementedError
+
+    @abstractmethod
     def save(self, path: Path) -> None:
         """Persist model weights/parameters to `path`."""
         raise NotImplementedError

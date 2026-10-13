@@ -1,14 +1,13 @@
 /**
  * src/types/auth.types.ts
- *
- * Purpose:
- *   Mirrors backend/app/models/user_schema.py exactly. Field names and
- *   types here must stay in sync with that file — this is the frontend
- *   half of the API contract referenced throughout the backend's own
- *   docstrings ("Connects to: ...").
+ * Mirrors backend/app/models/user_schema.py.
  */
-
 export type UserRole = "admin" | "soc_analyst";
+
+export const ROLE_LABELS: Record<UserRole, string> = {
+  admin: "Admin",
+  soc_analyst: "SOC Analyst",
+};
 
 export interface UserPublic {
   id: string;
@@ -32,13 +31,19 @@ export interface TokenResponse {
   user: UserPublic;
 }
 
-export interface RefreshRequest {
-  refresh_token: string;
-}
-
 export interface UserCreateRequest {
   username: string;
   email: string;
   password: string;
   role: UserRole;
+}
+
+export interface UserUpdateRequest {
+  role?: UserRole;
+  is_active?: boolean;
+}
+
+export interface ChangePasswordRequest {
+  current_password: string;
+  new_password: string;
 }

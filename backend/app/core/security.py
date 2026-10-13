@@ -8,12 +8,17 @@ Purpose:
     crypto surface area auditable in one place, which matters for a
     security-focused project.
 
+    Every token carries a unique `jti` claim. Refresh tokens are single-use:
+    api/v1/auth.py records a refresh token's jti as revoked when it is
+    exchanged or when the user logs out.
+
 Connects to:
     - api/v1/auth.py calls create_access_token / create_refresh_token / verify_password
     - core/dependencies.py calls decode_token to authenticate incoming requests
 """
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
+from uuid import uuid4
 
 from jose import JWTError, jwt
 from passlib.context import CryptContext
@@ -21,6 +26,9 @@ from passlib.context import CryptContext
 from app.core.config import settings
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+ACCESS_TOKEN = "access"
+REFRESH_TOKEN = "refresh"
 
 
 class TokenError(Exception):
@@ -41,6 +49,7 @@ def _create_token(subject: str, role: str, expires_delta: timedelta, token_type:
         "sub": subject,
         "role": role,
         "type": token_type,
+        "jti": uuid4().hex,
         "iat": now,
         "exp": now + expires_delta,
     }
@@ -49,12 +58,12 @@ def _create_token(subject: str, role: str, expires_delta: timedelta, token_type:
 
 def create_access_token(subject: str, role: str) -> str:
     expires = timedelta(minutes=settings.JWT_ACCESS_TOKEN_EXPIRE_MINUTES)
-    return _create_token(subject, role, expires, token_type="access")
+    return _create_token(subject, role, expires, token_type=ACCESS_TOKEN)
 
 
 def create_refresh_token(subject: str, role: str) -> str:
     expires = timedelta(days=settings.JWT_REFRESH_TOKEN_EXPIRE_DAYS)
-    return _create_token(subject, role, expires, token_type="refresh")
+    return _create_token(subject, role, expires, token_type=REFRESH_TOKEN)
 
 
 def decode_token(token: str, expected_type: Optional[str] = None) -> Dict[str, Any]:
@@ -70,5 +79,24 @@ def decode_token(token: str, expected_type: Optional[str] = None) -> Dict[str, A
 
     if expected_type and payload.get("type") != expected_type:
         raise TokenError(f"Expected token type '{expected_type}', got '{payload.get('type')}'")
+    if not payload.get("sub"):
+        raise TokenError("Token has no subject")
 
     return payload
+
+
+def token_expiry(payload: Dict[str, Any]) -> datetime:
+    """Expiry of a decoded token as an aware UTC datetime."""
+    return datetime.fromtimestamp(payload["exp"], tz=timezone.utc)
+
+
+def issued_before(payload: Dict[str, Any], cutoff: Optional[datetime]) -> bool:
+    """
+    True if the token was issued before `cutoff` — used to reject tokens
+    that predate a password change. A naive `cutoff` is taken as UTC.
+    """
+    if cutoff is None:
+        return False
+    if cutoff.tzinfo is None:
+        cutoff = cutoff.replace(tzinfo=timezone.utc)
+    return payload.get("iat", 0) < cutoff.timestamp()

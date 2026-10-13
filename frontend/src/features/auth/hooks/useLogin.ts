@@ -4,8 +4,7 @@
  * Purpose:
  *   Wraps AuthContext.login() in a React Query mutation so LoginForm
  *   gets loading/error state, retry semantics, and consistent handling
- *   for free, matching how every other mutation in the app is built
- *   (see e.g. future src/features/logs/hooks/useUploadLog.ts).
+ *   for free, matching how every other mutation in the app is built.
  */
 import { useMutation } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";

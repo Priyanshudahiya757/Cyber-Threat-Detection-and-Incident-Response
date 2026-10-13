@@ -1,0 +1,15 @@
+Jul 19 08:55:02 linux-web01 sshd[2101]: Accepted password for deploy from 10.0.0.11 port 50112 ssh2
+Jul 19 09:02:41 linux-web01 sshd[2140]: Accepted password for alice from 10.0.0.14 port 50544 ssh2
+Jul 19 09:10:17 linux-web01 sudo:   deploy : TTY=pts/0 ; PWD=/home/deploy ; USER=root ; COMMAND=/usr/bin/systemctl restart nginx
+Jul 19 09:12:03 linux-web01 sshd[2203]: Failed password for invalid user admin from 203.0.113.50 port 41822 ssh2
+Jul 19 09:12:06 linux-web01 sshd[2205]: Failed password for invalid user admin from 203.0.113.50 port 41830 ssh2
+Jul 19 09:12:09 linux-web01 sshd[2207]: Failed password for root from 203.0.113.50 port 41844 ssh2
+Jul 19 09:12:12 linux-web01 sshd[2209]: Failed password for root from 203.0.113.50 port 41851 ssh2
+Jul 19 09:12:15 linux-web01 sshd[2211]: Failed password for invalid user oracle from 203.0.113.50 port 41860 ssh2
+Jul 19 09:12:18 linux-web01 sshd[2213]: Failed password for invalid user test from 203.0.113.50 port 41872 ssh2
+Jul 19 09:12:21 linux-web01 sshd[2215]: Failed password for root from 203.0.113.50 port 41880 ssh2
+Jul 19 09:12:24 linux-web01 sshd[2217]: Failed password for invalid user ubuntu from 203.0.113.50 port 41893 ssh2
+Jul 19 09:25:40 linux-web01 sshd[2290]: Failed password for bob from 10.0.0.15 port 50790 ssh2
+Jul 19 09:25:52 linux-web01 sshd[2292]: Accepted password for bob from 10.0.0.15 port 50802 ssh2
+Jul 19 09:41:08 linux-web01 sudo:    alice : TTY=pts/1 ; PWD=/var/www ; USER=www-data ; COMMAND=/usr/bin/tail -f /var/log/nginx/access.log
+Jul 19 02:14:37 linux-web01 sshd[1877]: Accepted password for root from 198.51.100.23 port 60214 ssh2

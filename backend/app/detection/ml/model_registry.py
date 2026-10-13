@@ -44,7 +44,6 @@ MODEL_CLASS_REGISTRY: Dict[str, type] = {
 class ModelRegistry:
     def __init__(self, base_dir: Optional[str] = None):
         self.base_dir = Path(base_dir or settings.ML_MODEL_DIR)
-        self.base_dir.mkdir(parents=True, exist_ok=True)
         self._index_path = self.base_dir / "registry_index.json"
 
     def register_model(

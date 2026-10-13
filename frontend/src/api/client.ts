@@ -23,6 +23,7 @@
  */
 import axios, { AxiosError, type InternalAxiosRequestConfig } from "axios";
 import { env } from "@/config/env";
+import { ENDPOINTS } from "./endpoints";
 import { tokenStorage } from "./tokenStorage";
 import type { TokenResponse } from "@/types";
 
@@ -41,6 +42,8 @@ apiClient.interceptors.request.use((config) => {
 
 type RetriableConfig = InternalAxiosRequestConfig & { _retried?: boolean };
 
+const SESSION_ENDPOINTS = [ENDPOINTS.auth.login, ENDPOINTS.auth.logout, ENDPOINTS.auth.refresh];
+
 // Serializes concurrent refresh attempts: if five requests 401 at once,
 // only the first triggers a real refresh call; the rest await its result.
 let refreshInFlight: Promise<string> | null = null;
@@ -54,15 +57,15 @@ async function refreshAccessToken(): Promise<string> {
   // Deliberately bypasses `apiClient` (a fresh axios call) to avoid
   // re-triggering this same response interceptor recursively.
   const response = await axios.post<TokenResponse>(
-    `${env.apiBaseUrl}/auth/refresh`,
+    `${env.apiBaseUrl}${ENDPOINTS.auth.refresh}`,
     { refresh_token: refreshToken },
     { timeout: 10_000 }
   );
 
-  tokenStorage.save(
-    { accessToken: response.data.access_token, refreshToken: response.data.refresh_token },
-    localStorage.getItem("sentinelgrid.remember") === "true"
-  );
+  tokenStorage.replace({
+    accessToken: response.data.access_token,
+    refreshToken: response.data.refresh_token,
+  });
 
   return response.data.access_token;
 }
@@ -76,10 +79,9 @@ apiClient.interceptors.response.use(
       return Promise.reject(error);
     }
 
-    // Never attempt to refresh the refresh call itself.
-    if (originalRequest.url?.includes("/auth/refresh")) {
-      tokenStorage.clear();
-      window.location.href = "/login";
+    // A 401 from a session endpoint is its own answer (e.g. a wrong
+    // password at login), not an expired access token to refresh.
+    if (SESSION_ENDPOINTS.some((path) => originalRequest.url?.includes(path))) {
       return Promise.reject(error);
     }
 

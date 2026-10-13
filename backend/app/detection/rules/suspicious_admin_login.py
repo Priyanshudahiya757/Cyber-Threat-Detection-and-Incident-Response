@@ -16,13 +16,9 @@ MITRE ATT&CK:
 """
 from typing import List
 
-from app.detection.rules.base_rule import BaseRule, RuleConfig
+from app.detection.rules.base_rule import BaseRule, IntSetting, StringListSetting
 from app.models.detection_schema import DetectionEngine, DetectionEvent, Entity, EntityType
 from app.models.log_schema import NormalizedLog, Severity, SourceType
-
-_DEFAULT_PRIVILEGED_ACCOUNTS = {"root", "admin", "administrator"}
-_DEFAULT_BUSINESS_HOURS_START = 6   # 06:00 UTC
-_DEFAULT_BUSINESS_HOURS_END = 22    # 22:00 UTC
 
 _SUCCESSFUL_LOGIN_EVENT_TYPES = {"successful_login"}
 
@@ -32,15 +28,17 @@ class SuspiciousAdminLoginRule(BaseRule):
     description = "Successful login to a privileged account outside configured business hours."
     mitre_technique = "T1078 - Valid Accounts"
 
-    def __init__(self, config: RuleConfig = None, enabled: bool = True):
-        super().__init__(config, enabled)
-        self.privileged_accounts = {
-            u.lower() for u in self.config.get("privileged_accounts", _DEFAULT_PRIVILEGED_ACCOUNTS)
-        }
-        self.business_start = self.config.get("business_hours_start", _DEFAULT_BUSINESS_HOURS_START)
-        self.business_end = self.config.get("business_hours_end", _DEFAULT_BUSINESS_HOURS_END)
+    settings = {
+        "privileged_accounts": StringListSetting(default=("root", "admin", "administrator")),
+        "business_hours_start": IntSetting(default=6, minimum=0, maximum=23),  # hour of day, UTC
+        "business_hours_end": IntSetting(default=22, minimum=1, maximum=24),
+    }
 
     def evaluate(self, logs: List[NormalizedLog]) -> List[DetectionEvent]:
+        privileged_accounts = {account.lower() for account in self.config["privileged_accounts"]}
+        business_start = self.config["business_hours_start"]
+        business_end = self.config["business_hours_end"]
+
         detections: List[DetectionEvent] = []
 
         for log in logs:
@@ -48,12 +46,12 @@ class SuspiciousAdminLoginRule(BaseRule):
                 log.source_type not in {SourceType.LINUX.value, SourceType.WINDOWS.value}
                 or log.event_type not in _SUCCESSFUL_LOGIN_EVENT_TYPES
                 or not log.user
-                or log.user.lower() not in self.privileged_accounts
+                or log.user.lower() not in privileged_accounts
             ):
                 continue
 
             hour = log.timestamp.hour
-            is_off_hours = not (self.business_start <= hour < self.business_end)
+            is_off_hours = not (business_start <= hour < business_end)
             if not is_off_hours:
                 continue
 
@@ -68,7 +66,7 @@ class SuspiciousAdminLoginRule(BaseRule):
                     evidence_log_ids=[log.log_id],
                     explanation=(
                         f"Privileged account '{log.user}' logged in at {log.timestamp.strftime('%H:%M UTC')}, "
-                        f"outside configured business hours ({self.business_start}:00-{self.business_end}:00 UTC). "
+                        f"outside configured business hours ({business_start}:00-{business_end}:00 UTC). "
                         "Low-confidence signal — corroborate with source IP reputation and analyst context."
                     ),
                 )

@@ -51,6 +51,9 @@ class WindowsEventLogParser(BaseLogParser):
         events: List[ParsedEvent] = []
 
         for idx, record in enumerate(records):
+            if not isinstance(record, dict):
+                logger.debug(f"WindowsEventLogParser: record {idx} is not a JSON object, skipping")
+                continue
             event = self._parse_record(record, idx)
             if event is not None:
                 events.append(event)
@@ -90,12 +93,13 @@ class WindowsEventLogParser(BaseLogParser):
         return records
 
     def _parse_record(self, record: Dict[str, Any], idx: int) -> Optional[ParsedEvent]:
-        event_id = record.get("EventID")
-        if event_id is None:
-            logger.debug(f"WindowsEventLogParser: record {idx} missing EventID, skipping")
+        try:
+            event_id = int(record["EventID"])
+        except (KeyError, TypeError, ValueError):
+            logger.debug(f"WindowsEventLogParser: record {idx} has a missing or non-numeric EventID, skipping")
             return None
 
-        mapping = _EVENT_ID_MAP.get(int(event_id), _DEFAULT_MAPPING)
+        mapping = _EVENT_ID_MAP.get(event_id, _DEFAULT_MAPPING)
 
         timestamp = self._parse_timestamp(record.get("TimeCreated"))
         if timestamp is None:

@@ -4,82 +4,87 @@ app/detection/ml/prediction_service.py
 Purpose:
     Loads the latest registered model and scores a batch of NormalizedLog
     for anomalies, producing DetectionEvent objects (engine="ml") in the
-    exact same shape rule-based detections use — this is what lets
-    incidents/correlator.py (Phase 7) treat ML and rule detections
-    identically, and what makes the ML engine a drop-in addition to
-    detection/engine.py's on_ingested pipeline rather than a parallel
-    system.
+    exact same shape rule-based detections use — which is what lets
+    incidents/correlator.py treat ML and rule detections identically.
 
-    Risk scoring: IsolationForest's decision_function output is a raw,
-    unbounded real number (lower = more anomalous) with no intrinsic
-    "percent" meaning. This service converts it to an intuitive 0-100
-    risk_percentage via min-max normalization *within the scored batch*.
-    That's a deliberate, documented simplification — a globally
-    calibrated risk score would need a fixed reference distribution from
-    training time, which is a reasonable Phase-2-of-ML enhancement, not
-    a blocker for a working, explainable first version.
+    Risk scoring and explanation both come from the model itself
+    (AnomalyModel.risk_scores / feature_deviations), calibrated against
+    the data it was trained on. A flagged entity's explanation names the
+    features that deviate most from the training baseline, not merely
+    the largest raw numbers.
 
 Connects to:
     - detection/ml/model_registry.py for loading the latest model
     - detection/ml/feature_extraction.py for building the score matrix
-    - Produces app.models.detection_schema.DetectionEvent (engine=ML),
-      unifying with detection/engine.py's rule-based output
+    - detection/service.py calls predict() after ingestion and on manual scans
 """
 from typing import Dict, List, Optional
 
 import numpy as np
 
 from app.core.logging_config import get_logger
-from app.detection.ml.feature_extraction import FEATURE_NAMES, extract_entity_features
+from app.detection.ml.base_model import AnomalyModel
+from app.detection.ml.feature_extraction import FEATURE_NAMES, extract_feature_matrix
 from app.detection.ml.model_registry import ModelRegistry, default_registry
 from app.models.detection_schema import DetectionEngine, DetectionEvent, Entity, EntityType
 from app.models.log_schema import NormalizedLog, Severity
 
 logger = get_logger(__name__)
 
-#: Anomaly detections at or above this risk percentage are surfaced as
-#: HIGH severity rather than MEDIUM — mirrors the rule engine's severity
-#: escalation pattern for consistency across both detection engines.
+#: Anomalies at or above this risk are HIGH severity rather than MEDIUM.
+#: 50 is the model's anomaly boundary, so 75 is halfway to the most
+#: anomalous entity seen in training.
 HIGH_RISK_THRESHOLD = 75.0
 
+#: A feature must sit at least this many standard deviations above the
+#: training baseline to be named in an explanation.
+_NOTABLE_DEVIATION = 1.0
 
-class NoTrainedModelError(Exception):
-    """Raised when prediction is requested but no model has been trained yet."""
+#: Evidence log ids attached to one ML detection are capped at this many.
+_MAX_EVIDENCE_LOGS = 50
 
 
 class PredictionService:
     def __init__(self, registry: Optional[ModelRegistry] = None):
         self.registry = registry or default_registry
+        self._cached_model: Optional[AnomalyModel] = None
+        self._cached_version: Optional[str] = None
+
+    def _latest_model(self, model_type: str) -> Optional[AnomalyModel]:
+        """Load the latest model, re-reading from disk only when a new version was registered."""
+        metadata = self.registry.get_latest_metadata(model_type)
+        if metadata is None:
+            return None
+        if self._cached_model is None or self._cached_version != metadata["version"]:
+            self._cached_model = self.registry.get_latest_model(model_type)
+            self._cached_version = metadata["version"]
+        return self._cached_model
 
     def predict(self, logs: List[NormalizedLog], model_type: str = "isolation_forest") -> List[DetectionEvent]:
         """
         Scores every entity present in `logs` against the latest trained
         model and returns a DetectionEvent for each one flagged
-        anomalous. Returns an empty list (with a warning logged) rather
-        than raising if no model has been trained yet — this keeps the
-        ingestion pipeline's on_ingested hook resilient exactly the way
-        detection/engine.py's per-rule exception handling does; a
-        not-yet-trained ML engine shouldn't block rule-based detection.
+        anomalous. Returns an empty list rather than raising if no model
+        has been trained yet — a not-yet-trained ML engine shouldn't
+        block rule-based detection.
         """
-        model = self.registry.get_latest_model(model_type)
+        if not logs:
+            return []
+
+        model = self._latest_model(model_type)
         if model is None:
-            logger.warning(
-                f"PredictionService: no trained '{model_type}' model available yet; skipping ML detection"
-            )
+            logger.info(f"PredictionService: no trained '{model_type}' model yet; skipping ML detection")
             return []
 
-        entity_features = extract_entity_features(logs)
-        if not entity_features:
+        X, entity_order = extract_feature_matrix(logs)
+        if not entity_order:
             return []
-
-        entity_order = list(entity_features.keys())
-        X = np.vstack([entity_features[ip] for ip in entity_order])
 
         predictions = model.predict(X)
         scores = model.decision_scores(X)
-        risk_percentages = self._scores_to_risk_percentages(scores)
+        risks = model.risk_scores(X)
+        deviations = model.feature_deviations(X)
 
-        # Map entity -> its evidence log_ids, for the DetectionEvent trail.
         evidence_by_entity: Dict[str, List[str]] = {}
         for log in logs:
             if log.source_ip:
@@ -90,20 +95,17 @@ class PredictionService:
             if predictions[i] != -1:
                 continue  # not flagged anomalous by the model
 
-            risk = risk_percentages[i]
-            severity = Severity.HIGH if risk >= HIGH_RISK_THRESHOLD else Severity.MEDIUM
-            explanation = self._build_explanation(entity_features[entity_ip], risk)
-
+            risk = float(risks[i])
             detections.append(
                 DetectionEvent(
                     engine=DetectionEngine.ML,
                     anomaly_score=float(scores[i]),
                     risk_percentage=round(risk, 2),
-                    confidence=round(min(1.0, risk / 100.0), 2),
-                    severity=severity,
+                    confidence=round(risk / 100.0, 2),
+                    severity=Severity.HIGH if risk >= HIGH_RISK_THRESHOLD else Severity.MEDIUM,
                     entity=Entity(type=EntityType.IP, value=entity_ip),
-                    evidence_log_ids=evidence_by_entity.get(entity_ip, [])[:50],
-                    explanation=explanation,
+                    evidence_log_ids=sorted(evidence_by_entity.get(entity_ip, []))[:_MAX_EVIDENCE_LOGS],
+                    explanation=self._build_explanation(X[i], deviations[i], risk),
                 )
             )
 
@@ -113,31 +115,16 @@ class PredictionService:
         return detections
 
     @staticmethod
-    def _scores_to_risk_percentages(scores: np.ndarray) -> np.ndarray:
-        """Min-max normalize decision scores (lower=more anomalous) to a 0-100 risk scale (higher=riskier)."""
-        min_score, max_score = scores.min(), scores.max()
-        spread = max_score - min_score
-        if spread == 0:
-            # All entities equally "normal" relative to each other — no
-            # meaningful risk differentiation possible within this batch.
-            return np.zeros_like(scores)
-        return 100.0 * (max_score - scores) / spread
-
-    @staticmethod
-    def _build_explanation(feature_vector: np.ndarray, risk: float) -> str:
-        """
-        Basic explainability: report the top contributing raw feature
-        values by magnitude, so an analyst sees *why* an entity was
-        flagged rather than just a bare score. This is intentionally
-        simple (no SHAP/LIME) — appropriate for a first ML pass, and
-        upgradeable later without changing the DetectionEvent contract.
-        """
-        ranked = sorted(zip(FEATURE_NAMES, feature_vector), key=lambda x: x[1], reverse=True)
-        top_features = ", ".join(f"{name}={value:.1f}" for name, value in ranked[:3] if value > 0)
-        return (
-            f"Isolation Forest flagged this entity as anomalous (risk {risk:.0f}%). "
-            f"Top contributing signals: {top_features or 'low overall activity relative to peers'}."
-        )
+    def _build_explanation(features: np.ndarray, deviations: np.ndarray, risk: float) -> str:
+        """Name the (up to three) features furthest above the training baseline."""
+        ranked = sorted(zip(FEATURE_NAMES, features, deviations), key=lambda item: item[2], reverse=True)
+        notable = [
+            f"{name}={value:g} ({deviation:.1f}σ above normal)"
+            for name, value, deviation in ranked[:3]
+            if deviation >= _NOTABLE_DEVIATION
+        ]
+        signals = ", ".join(notable) or "an unusual combination of otherwise ordinary activity"
+        return f"Isolation Forest flagged this entity as anomalous (risk {risk:.0f}%). Top signals: {signals}."
 
 
 default_prediction_service = PredictionService()

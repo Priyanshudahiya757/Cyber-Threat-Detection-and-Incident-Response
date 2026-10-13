@@ -17,7 +17,7 @@ Purpose:
     module globals.
 
 Connects to:
-    - api/v1/ml.py::train_model / retrain_model call TrainingService.train()
+    - api/v1/ml.py::train_model calls TrainingService.train()
     - detection/ml/feature_extraction.py for X construction
     - detection/ml/isolation_forest_model.py for the concrete model
     - detection/ml/model_registry.py for persistence

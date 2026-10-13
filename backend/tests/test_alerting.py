@@ -2,9 +2,9 @@
 tests/test_alerting.py
 
 Purpose:
-    Tests alert generation thresholding logic in isolation from MongoDB
-    (save_alert is monkeypatched, matching the established pattern for
-    anything touching a repository function).
+    Alert generation rules: which severities alert, the cool-down that
+    stops an ongoing attack from alerting on every batch, and resilience
+    to storage failures.
 """
 import pytest
 
@@ -13,14 +13,14 @@ from app.models.detection_schema import DetectionEngine, DetectionEvent, Entity,
 from app.models.log_schema import Severity
 
 
-def make_detection(severity: Severity, **overrides) -> DetectionEvent:
+def make_detection(severity: Severity, ip: str = "192.168.1.20", **overrides) -> DetectionEvent:
     defaults = dict(
         engine=DetectionEngine.RULE,
         rule_name="ssh_brute_force",
         confidence=0.8,
         severity=severity,
         mitre_technique="T1110 - Brute Force",
-        entity=Entity(type=EntityType.IP, value="192.168.1.20"),
+        entity=Entity(type=EntityType.IP, value=ip),
         evidence_log_ids=["a", "b"],
         explanation="test detection",
     )
@@ -30,82 +30,58 @@ def make_detection(severity: Severity, **overrides) -> DetectionEvent:
 
 @pytest.mark.asyncio
 class TestGenerateAlerts:
-    async def test_high_severity_generates_alert(self, monkeypatch):
-        saved = []
+    async def test_high_and_critical_generate_alerts(self, mock_db):
+        alerts = await generate_alerts(
+            [make_detection(Severity.HIGH, ip="10.0.0.1"), make_detection(Severity.CRITICAL, ip="10.0.0.2")]
+        )
 
-        async def fake_save_alert(alert):
-            saved.append(alert)
+        assert [a.severity for a in alerts] == ["high", "critical"]
+        assert await mock_db.alerts.count_documents({}) == 2
+        assert all(a.id for a in alerts)
 
-        monkeypatch.setattr("app.detection.alerting.save_alert", fake_save_alert)
+    async def test_low_and_medium_do_not_generate_alerts(self, mock_db):
+        alerts = await generate_alerts([make_detection(Severity.LOW), make_detection(Severity.MEDIUM)])
 
+        assert alerts == []
+        assert await mock_db.alerts.count_documents({}) == 0
+
+    async def test_alert_carries_the_detection_details(self, mock_db):
         detection = make_detection(Severity.HIGH)
-        result = await generate_alerts([detection])
+        [alert] = await generate_alerts([detection])
 
-        assert len(result) == 1
-        assert len(saved) == 1
-        assert saved[0].severity == Severity.HIGH.value
+        assert alert.threat_type == "ssh_brute_force"
+        assert alert.title == "SSH Brute Force — 192.168.1.20"
+        assert alert.detection_id == detection.detection_id
+        assert alert.acknowledged is False
 
-    async def test_critical_severity_generates_alert(self, monkeypatch):
-        saved = []
+    async def test_ml_detection_is_labelled_as_ai_anomaly(self, mock_db):
+        detection = make_detection(Severity.HIGH, engine=DetectionEngine.ML, rule_name=None, mitre_technique=None)
+        [alert] = await generate_alerts([detection])
 
-        async def fake_save_alert(alert):
-            saved.append(alert)
+        assert alert.threat_type == "ml_anomaly"
+        assert alert.title.startswith("AI Anomaly")
 
-        monkeypatch.setattr("app.detection.alerting.save_alert", fake_save_alert)
+    async def test_repeat_for_same_entity_and_threat_is_suppressed(self, mock_db):
+        first = await generate_alerts([make_detection(Severity.HIGH)])
+        again = await generate_alerts([make_detection(Severity.CRITICAL, evidence_log_ids=["a", "b", "c"])])
 
-        detection = make_detection(Severity.CRITICAL)
-        result = await generate_alerts([detection])
-        assert len(result) == 1
+        assert len(first) == 1
+        assert again == []
+        assert await mock_db.alerts.count_documents({}) == 1
 
-    async def test_low_severity_does_not_generate_alert(self, monkeypatch):
-        saved = []
+    async def test_duplicates_within_one_call_are_suppressed(self, mock_db):
+        alerts = await generate_alerts([make_detection(Severity.HIGH), make_detection(Severity.HIGH)])
+        assert len(alerts) == 1
 
-        async def fake_save_alert(alert):
-            saved.append(alert)
+    async def test_different_threat_on_same_entity_still_alerts(self, mock_db):
+        await generate_alerts([make_detection(Severity.HIGH)])
+        other = await generate_alerts([make_detection(Severity.HIGH, rule_name="port_scan")])
+        assert len(other) == 1
 
-        monkeypatch.setattr("app.detection.alerting.save_alert", fake_save_alert)
-
-        detection = make_detection(Severity.LOW)
-        result = await generate_alerts([detection])
-
-        assert result == []
-        assert saved == []
-
-    async def test_medium_severity_does_not_generate_alert(self, monkeypatch):
-        async def fake_save_alert(alert):
-            pass
-
-        monkeypatch.setattr("app.detection.alerting.save_alert", fake_save_alert)
-
-        detection = make_detection(Severity.MEDIUM)
-        result = await generate_alerts([detection])
-        assert result == []
-
-    async def test_mixed_severities_only_alerts_qualifying_ones(self, monkeypatch):
-        saved = []
-
-        async def fake_save_alert(alert):
-            saved.append(alert)
-
-        monkeypatch.setattr("app.detection.alerting.save_alert", fake_save_alert)
-
-        detections = [
-            make_detection(Severity.LOW),
-            make_detection(Severity.HIGH),
-            make_detection(Severity.MEDIUM),
-            make_detection(Severity.CRITICAL),
-        ]
-        result = await generate_alerts(detections)
-
-        assert len(result) == 2
-        assert len(saved) == 2
-
-    async def test_alert_persistence_failure_does_not_raise(self, monkeypatch):
+    async def test_persistence_failure_does_not_raise(self, mock_db, monkeypatch):
         async def failing_save_alert(alert):
             raise ConnectionError("mongo is down")
 
         monkeypatch.setattr("app.detection.alerting.save_alert", failing_save_alert)
 
-        detection = make_detection(Severity.HIGH)
-        result = await generate_alerts([detection])  # should not raise
-        assert result == []  # failed to persist, so not included
+        assert await generate_alerts([make_detection(Severity.HIGH)]) == []

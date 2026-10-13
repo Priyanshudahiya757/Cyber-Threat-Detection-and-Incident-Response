@@ -1,24 +1,24 @@
 /**
  * src/services/detectionService.ts
- * Real Axios wrappers for /detections/* and /ml/* endpoints.
+ * Stored detections and the two engines that produce them
+ * (backend/app/api/v1/detections.py and ml.py).
  */
 import { apiClient } from "@/api/client";
 import { ENDPOINTS } from "@/api/endpoints";
 import type {
-  AlertListResponse,
+  DetectionEngineType,
   DetectionListResponse,
-  DetectionRuleInfo,
   DetectionRunResult,
   EvaluationMetrics,
   ModelMetadata,
-  PredictAnomaliesResponse,
+  Severity,
   TrainModelResponse,
 } from "@/types";
 
 export const detectionService = {
   async list(params?: {
-    engine?: string;
-    severity?: string;
+    engine?: DetectionEngineType;
+    severity?: Severity;
     entity?: string;
     limit?: number;
   }): Promise<DetectionListResponse> {
@@ -26,47 +26,33 @@ export const detectionService = {
     return response.data;
   },
 
-  async listAlerts(limit = 100): Promise<AlertListResponse> {
-    const response = await apiClient.get<AlertListResponse>(ENDPOINTS.detections.alerts, {
-      params: { limit },
-    });
-    return response.data;
-  },
-
-  async listEngineRules(): Promise<{ rules: DetectionRuleInfo[] }> {
-    const response = await apiClient.get<{ rules: DetectionRuleInfo[] }>(ENDPOINTS.detections.rules);
-    return response.data;
-  },
-
-  async runDetection(minutes = 60): Promise<DetectionRunResult> {
+  /** Re-run the rule engine over logs ingested in the last `minutes`. */
+  async runRules(minutes: number): Promise<DetectionRunResult> {
     const response = await apiClient.post<DetectionRunResult>(ENDPOINTS.detections.run, null, {
       params: { minutes },
     });
     return response.data;
   },
 
-  async trainModel(days = 7): Promise<TrainModelResponse> {
+  /** Score logs ingested in the last `minutes` with the latest trained model. */
+  async runAnomalyScoring(minutes: number): Promise<DetectionRunResult> {
+    const response = await apiClient.post<DetectionRunResult>(ENDPOINTS.ml.predict, null, {
+      params: { minutes },
+    });
+    return response.data;
+  },
+
+  /** Admin-only: train a new model version on logs ingested in the last `days`. */
+  async trainModel(days: number): Promise<TrainModelResponse> {
     const response = await apiClient.post<TrainModelResponse>(ENDPOINTS.ml.train, null, {
       params: { days },
     });
     return response.data;
   },
 
-  async predict(minutes = 60): Promise<PredictAnomaliesResponse> {
-    const response = await apiClient.post<PredictAnomaliesResponse>(ENDPOINTS.ml.predict, null, {
-      params: { minutes },
-    });
-    return response.data;
-  },
-
-  async listModels(): Promise<{ models: ModelMetadata[] }> {
+  async listModels(): Promise<ModelMetadata[]> {
     const response = await apiClient.get<{ models: ModelMetadata[] }>(ENDPOINTS.ml.models);
-    return response.data;
-  },
-
-  async latestModel(): Promise<ModelMetadata> {
-    const response = await apiClient.get<ModelMetadata>(ENDPOINTS.ml.latestModel);
-    return response.data;
+    return response.data.models;
   },
 
   async evaluate(): Promise<EvaluationMetrics> {

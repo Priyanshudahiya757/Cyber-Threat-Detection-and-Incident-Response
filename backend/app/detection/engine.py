@@ -2,30 +2,26 @@
 app/detection/engine.py
 
 Purpose:
-    Owns the registry of active detection rules and runs all enabled
-    rules against a batch of NormalizedLog, collecting their
-    DetectionEvent output. This is the single place that knows "which
-    rules exist" — everything else (the ingestion pipeline's on_ingested
-    hook, the manual /detections/run API endpoint, tests) goes through
-    RuleEngine.run() rather than importing individual rule classes.
+    Owns the registry of detection rules and runs all enabled rules
+    against a batch of NormalizedLog, collecting their DetectionEvent
+    output. This is the single place that knows "which rules exist" —
+    everything else goes through RuleEngine rather than importing
+    individual rule classes.
 
     A rule raising an exception is caught and logged per-rule so one
     broken rule can't take down detection for the rest of the batch —
-    this mirrors the same isolation principle used in
-    ingestion/pipeline.py for per-record parsing errors.
+    the same isolation principle ingestion/pipeline.py uses for
+    per-record parsing errors.
 
 Connects to:
-    - Instantiated once as `default_rule_engine` and registered with
-      ingestion/pipeline.py::default_pipeline as the on_ingested callback
-      (wired in app/main.py)
-    - detection/alerting.py consumes RuleEngine.run() output to generate
-      alerts for high-severity detections
-    - db/mongo.py persists DetectionEvent results
+    - detection/service.py runs `default_rule_engine` over detection windows
+    - api/v1/rules.py lists rules and changes their enabled state / settings
+    - main.py restores persisted rule state at startup
 """
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from app.core.logging_config import get_logger
-from app.detection.rules.base_rule import BaseRule
+from app.detection.rules.base_rule import BaseRule, RuleConfigError
 from app.detection.rules.directory_traversal import DirectoryTraversalRule
 from app.detection.rules.port_scan import PortScanRule
 from app.detection.rules.privilege_escalation import PrivilegeEscalationRule
@@ -59,11 +55,7 @@ def _default_rules() -> List[BaseRule]:
 
 
 class RuleEngine:
-    """
-    Runs a configurable set of BaseRule instances against a log batch.
-    Rules can be enabled/disabled by name at runtime (see set_rule_enabled),
-    which is what Phase 5's admin rule-configuration API will drive.
-    """
+    """Runs a configurable set of BaseRule instances against a log batch."""
 
     def __init__(self, rules: Optional[List[BaseRule]] = None):
         self._rules: Dict[str, BaseRule] = {rule.rule_name: rule for rule in (rules or _default_rules())}
@@ -103,50 +95,22 @@ class RuleEngine:
         rule.enabled = enabled
         return True
 
+    def apply_persisted_state(self, saved: List[Dict[str, Any]]) -> None:
+        """
+        Restore enabled state and settings saved by the rules API. Entries
+        for rules that no longer exist, or settings that are no longer
+        valid, are skipped so stale stored config can never block startup.
+        """
+        for entry in saved:
+            rule = self._rules.get(entry.get("rule_name", ""))
+            if rule is None:
+                continue
+            rule.enabled = bool(entry.get("enabled", True))
+            try:
+                rule.update_config(entry.get("config") or {})
+            except RuleConfigError as exc:
+                logger.warning(f"RuleEngine: ignoring stored settings for '{rule.rule_name}': {exc}")
 
-#: Process-wide singleton, registered as the ingestion pipeline's
-#: on_ingested callback in app/main.py at startup.
+
+#: Process-wide singleton used by detection/service.py and api/v1/rules.py.
 default_rule_engine = RuleEngine()
-
-
-async def handle_ingested_logs(logs: List[NormalizedLog]) -> None:
-    """
-    Post-ingestion hook: run BOTH detection engines (rule-based and ML)
-    against freshly ingested logs, persist any resulting detections, and
-    generate alerts for high-severity ones. Registered with
-    ingestion.pipeline.default_pipeline.register_on_ingested_callback()
-    in app/main.py.
-
-    The two engines are independent and additive — a rule-engine failure
-    doesn't block ML scoring or vice versa (each is wrapped separately),
-    matching the same fault-isolation principle used within RuleEngine.run()
-    for individual rules.
-    """
-    # Imported locally to avoid a module-level circular import concern
-    # and to keep the dependency explicit at the point of use (mirrors
-    # alerting.py's own import style).
-    from app.db.mongo import save_detections
-    from app.detection.alerting import generate_alerts
-    from app.detection.ml.prediction_service import default_prediction_service
-
-    rule_detections = default_rule_engine.run(logs)
-
-    try:
-        ml_detections = default_prediction_service.predict(logs)
-    except Exception as exc:
-        logger.error(f"handle_ingested_logs: ML prediction failed, continuing with rule detections only: {exc}")
-        ml_detections = []
-
-    all_detections = rule_detections + ml_detections
-    if not all_detections:
-        return
-
-    await save_detections(all_detections)
-    await generate_alerts(all_detections)
-
-    try:
-        from app.incidents.correlator import correlate_detections
-
-        await correlate_detections(all_detections)
-    except Exception as exc:
-        logger.error(f"handle_ingested_logs: incident correlation failed: {exc}")

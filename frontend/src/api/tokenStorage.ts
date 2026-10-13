@@ -8,27 +8,37 @@
  *   "Remember me" checkbox: checked -> localStorage (survives browser
  *   restart), unchecked -> sessionStorage (cleared when the tab closes).
  */
-
 const ACCESS_TOKEN_KEY = "sentinelgrid.access_token";
 const REFRESH_TOKEN_KEY = "sentinelgrid.refresh_token";
 const REMEMBER_KEY = "sentinelgrid.remember";
 
-type TokenPair = { accessToken: string; refreshToken: string };
+export type TokenPair = { accessToken: string; refreshToken: string };
+
+function isRemembered(): boolean {
+  return localStorage.getItem(REMEMBER_KEY) === "true";
+}
 
 function activeStorage(): Storage {
-  const remembered = localStorage.getItem(REMEMBER_KEY) === "true";
-  return remembered ? localStorage : sessionStorage;
+  return isRemembered() ? localStorage : sessionStorage;
+}
+
+function write(storage: Storage, tokens: TokenPair): void {
+  storage.setItem(ACCESS_TOKEN_KEY, tokens.accessToken);
+  storage.setItem(REFRESH_TOKEN_KEY, tokens.refreshToken);
 }
 
 export const tokenStorage = {
+  /** Store the tokens issued at login, in the storage the "Remember me" choice selects. */
   save(tokens: TokenPair, remember: boolean): void {
-    // The "remember" flag itself always lives in localStorage (it has to
-    // survive independently of which storage the tokens end up in) so a
-    // later page load knows which storage to check first.
+    // The flag itself always lives in localStorage so a later page load
+    // knows which storage holds the tokens.
     localStorage.setItem(REMEMBER_KEY, String(remember));
-    const storage = remember ? localStorage : sessionStorage;
-    storage.setItem(ACCESS_TOKEN_KEY, tokens.accessToken);
-    storage.setItem(REFRESH_TOKEN_KEY, tokens.refreshToken);
+    write(remember ? localStorage : sessionStorage, tokens);
+  },
+
+  /** Replace the tokens of the current session (refresh, password change), keeping the "Remember me" choice. */
+  replace(tokens: TokenPair): void {
+    write(activeStorage(), tokens);
   },
 
   getAccessToken(): string | null {
@@ -40,10 +50,10 @@ export const tokenStorage = {
   },
 
   clear(): void {
-    localStorage.removeItem(ACCESS_TOKEN_KEY);
-    localStorage.removeItem(REFRESH_TOKEN_KEY);
+    for (const storage of [localStorage, sessionStorage]) {
+      storage.removeItem(ACCESS_TOKEN_KEY);
+      storage.removeItem(REFRESH_TOKEN_KEY);
+    }
     localStorage.removeItem(REMEMBER_KEY);
-    sessionStorage.removeItem(ACCESS_TOKEN_KEY);
-    sessionStorage.removeItem(REFRESH_TOKEN_KEY);
   },
 };

@@ -1,15 +1,10 @@
 /**
  * src/services/incidentService.ts
- * Real Axios wrappers for /incidents/* endpoints.
+ * Incident workflow (backend/app/api/v1/incidents.py).
  */
 import { apiClient } from "@/api/client";
 import { ENDPOINTS } from "@/api/endpoints";
-import type {
-  IncidentListParams,
-  IncidentNoteRequest,
-  IncidentRecord,
-  IncidentStatusUpdateRequest,
-} from "@/types";
+import type { IncidentListParams, IncidentRecord, IncidentStatusUpdateRequest } from "@/types";
 
 export const incidentService = {
   async list(params: IncidentListParams = {}): Promise<{ incidents: IncidentRecord[]; count: number }> {
@@ -30,8 +25,8 @@ export const incidentService = {
     return response.data;
   },
 
-  async addNote(ref: string, body: IncidentNoteRequest): Promise<IncidentRecord> {
-    const response = await apiClient.post<IncidentRecord>(ENDPOINTS.incidents.notes(ref), body);
+  async addNote(ref: string, note: string): Promise<IncidentRecord> {
+    const response = await apiClient.post<IncidentRecord>(ENDPOINTS.incidents.notes(ref), { note });
     return response.data;
   },
 

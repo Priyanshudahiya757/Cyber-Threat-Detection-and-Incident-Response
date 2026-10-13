@@ -11,8 +11,8 @@ from datetime import datetime, timedelta
 
 import pytest
 
-from app.detection.engine import RuleEngine, handle_ingested_logs
-from app.detection.rules.base_rule import BaseRule
+from app.detection.engine import RuleEngine
+from app.detection.rules.base_rule import BaseRule, RuleConfigError
 from app.detection.rules.ssh_brute_force import SSHBruteForceRule
 from app.models.detection_schema import DetectionEvent, DetectionEngine as EngineType, Entity, EntityType
 from app.models.log_schema import EventCategory, NormalizedLog, Severity, SourceType
@@ -113,46 +113,39 @@ class TestRuleEngine:
         assert detections[0].rule_name == "ssh_brute_force"
 
 
-@pytest.mark.asyncio
-class TestHandleIngestedLogs:
-    async def test_persists_detections_and_generates_alerts(self, monkeypatch):
-        saved_detections = []
-        generated_alerts = []
+class TestRuleSettings:
+    def test_settings_start_at_declared_defaults(self):
+        assert SSHBruteForceRule().config == {"threshold": 4, "window_seconds": 120}
 
-        async def fake_save_detections(detections):
-            saved_detections.extend(detections)
-
-        async def fake_generate_alerts(detections):
-            generated_alerts.extend(detections)
-            return detections
-
-        monkeypatch.setattr("app.db.mongo.save_detections", fake_save_detections)
-        monkeypatch.setattr("app.detection.alerting.generate_alerts", fake_generate_alerts)
-
+    def test_updated_threshold_takes_effect_immediately(self):
+        rule = SSHBruteForceRule()
         logs = [
             make_log(source_ip="192.168.1.20", timestamp=BASE_TIME + timedelta(seconds=i * 2))
             for i in range(5)
         ]
-        await handle_ingested_logs(logs)
+        assert len(rule.evaluate(logs)) == 1
 
-        assert len(saved_detections) == 1
-        assert len(generated_alerts) == 1
+        rule.update_config({"threshold": 6})
+        assert rule.evaluate(logs) == []
 
-    async def test_no_detections_means_no_persistence_calls(self, monkeypatch):
-        called = {"save": False, "alert": False}
+    def test_unknown_setting_is_rejected(self):
+        with pytest.raises(RuleConfigError):
+            SSHBruteForceRule().update_config({"no_such_setting": 1})
 
-        async def fake_save_detections(detections):
-            called["save"] = True
+    def test_out_of_range_value_is_rejected_and_nothing_is_applied(self):
+        rule = SSHBruteForceRule()
+        with pytest.raises(RuleConfigError):
+            rule.update_config({"window_seconds": 300, "threshold": 0})
+        assert rule.config == {"threshold": 4, "window_seconds": 120}
 
-        async def fake_generate_alerts(detections):
-            called["alert"] = True
-            return []
-
-        monkeypatch.setattr("app.db.mongo.save_detections", fake_save_detections)
-        monkeypatch.setattr("app.detection.alerting.generate_alerts", fake_generate_alerts)
-
-        # A single benign log won't trigger any of the 8 default rules.
-        await handle_ingested_logs([make_log(event_type="successful_login")])
-
-        assert called["save"] is False
-        assert called["alert"] is False
+    def test_persisted_state_is_restored_and_stale_entries_ignored(self):
+        engine = RuleEngine(rules=[SSHBruteForceRule()])
+        engine.apply_persisted_state(
+            [
+                {"rule_name": "ssh_brute_force", "enabled": False, "config": {"threshold": 9}},
+                {"rule_name": "rule_that_was_removed", "enabled": True, "config": {}},
+            ]
+        )
+        rule = engine.get_rule("ssh_brute_force")
+        assert rule.enabled is False
+        assert rule.config["threshold"] == 9

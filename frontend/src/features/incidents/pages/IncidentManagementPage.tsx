@@ -1,18 +1,26 @@
 /**
  * Incident Management — triage, assign, comment, resolve, close.
  */
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { format, parseISO } from "date-fns";
 import { useAuth } from "@/features/auth/hooks/useAuth";
 import { incidentService } from "@/services/incidentService";
-import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/Card";
-import { Badge } from "@/components/ui/Badge";
-import { severityToTone } from "@/components/ui/badgeUtils";
-import { Button } from "@/components/ui/Button";
-import { Input } from "@/components/ui/Input";
-import { Spinner } from "@/components/ui/Spinner";
-import type { IncidentRecord, IncidentStatus, Severity } from "@/types";
+import { userService } from "@/services/userService";
+import { getErrorMessage } from "@/lib/apiError";
+import { formatDateTime } from "@/lib/format";
+import {
+  Badge,
+  Button,
+  Card,
+  CardBody,
+  CardHeader,
+  CardTitle,
+  Input,
+  Notice,
+  Select,
+  Spinner,
+} from "@/components/ui";
+import { INCIDENT_STATUSES, type IncidentRecord, type IncidentStatus } from "@/types";
 
 const STATUS_TONE: Record<IncidentStatus, "info" | "warning" | "success" | "neutral"> = {
   OPEN: "warning",
@@ -21,20 +29,193 @@ const STATUS_TONE: Record<IncidentStatus, "info" | "warning" | "success" | "neut
   CLOSED: "neutral",
 };
 
-export function IncidentManagementPage() {
+/** Status buttons offered for each current status, mirroring the backend's transition rules. */
+const NEXT_STATUSES: Record<IncidentStatus, { status: IncidentStatus; label: string }[]> = {
+  OPEN: [
+    { status: "INVESTIGATING", label: "Investigate" },
+    { status: "RESOLVED", label: "Resolve" },
+    { status: "CLOSED", label: "Close" },
+  ],
+  INVESTIGATING: [
+    { status: "RESOLVED", label: "Resolve" },
+    { status: "CLOSED", label: "Close" },
+  ],
+  RESOLVED: [
+    { status: "INVESTIGATING", label: "Reopen" },
+    { status: "CLOSED", label: "Close" },
+  ],
+  CLOSED: [],
+};
+
+function Field({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div>
+      <p className="text-2xs uppercase text-text-muted">{label}</p>
+      <div className="mt-0.5 text-sm text-text-primary">{children}</div>
+    </div>
+  );
+}
+
+function IncidentDetail({ incident }: { incident: IncidentRecord }) {
   const { user } = useAuth();
   const queryClient = useQueryClient();
+  const [note, setNote] = useState("");
+  const [assignee, setAssignee] = useState(incident.assigned_to ?? user?.username ?? "");
+  const [error, setError] = useState<string | null>(null);
+
+  const assignableQuery = useQuery({ queryKey: ["users", "assignable"], queryFn: userService.listAssignable });
+  const isClosed = incident.status === "CLOSED";
+
+  const mutationOptions = {
+    onSuccess: (updated: IncidentRecord) => {
+      setError(null);
+      queryClient.setQueryData(["incidents", "detail", updated.incident_ref], updated);
+      queryClient.invalidateQueries({ queryKey: ["incidents", "list"] });
+      queryClient.invalidateQueries({ queryKey: ["analytics"] });
+    },
+    onError: (err: unknown) => setError(getErrorMessage(err)),
+  };
+
+  const statusMutation = useMutation({
+    mutationFn: (status: IncidentStatus) => incidentService.updateStatus(incident.incident_ref, { status }),
+    ...mutationOptions,
+  });
+
+  const assignMutation = useMutation({
+    mutationFn: () => incidentService.assign(incident.incident_ref, assignee),
+    ...mutationOptions,
+  });
+
+  const noteMutation = useMutation({
+    mutationFn: () => incidentService.addNote(incident.incident_ref, note.trim()),
+    ...mutationOptions,
+    onSuccess: (updated: IncidentRecord) => {
+      setNote("");
+      mutationOptions.onSuccess(updated);
+    },
+  });
+
+  return (
+    <div className="space-y-5">
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Field label="Threat">{incident.threat_type}</Field>
+        <Field label="Entity">
+          <span className="font-data text-accent-cyan">{incident.entity.value}</span>
+          <span className="ml-2 text-2xs uppercase text-text-muted">{incident.entity.type}</span>
+        </Field>
+        <Field label="Severity">
+          <Badge tone={incident.severity} />
+        </Field>
+        <Field label="Status">
+          <Badge tone={STATUS_TONE[incident.status]}>{incident.status}</Badge>
+        </Field>
+        <Field label="Assigned to">{incident.assigned_to ?? "Unassigned"}</Field>
+        <Field label="MITRE ATT&CK">{incident.mitre_technique ?? "—"}</Field>
+        <Field label="Opened">
+          <span className="font-data">{formatDateTime(incident.created_at)}</span>
+        </Field>
+        <Field label="Evidence">
+          {incident.detection_ids.length} detection(s), {incident.evidence_log_ids.length} log(s)
+        </Field>
+      </div>
+
+      <p className="text-sm text-text-secondary">{incident.description}</p>
+
+      {error && <Notice tone="error">{error}</Notice>}
+
+      {isClosed ? (
+        <p className="text-sm text-text-muted">This incident is closed and kept for the audit trail.</p>
+      ) : (
+        <>
+          <div className="flex flex-wrap gap-2">
+            {NEXT_STATUSES[incident.status].map(({ status, label }) => (
+              <Button
+                key={status}
+                size="sm"
+                variant={status === "CLOSED" ? "danger" : "outline"}
+                disabled={statusMutation.isPending}
+                onClick={() => statusMutation.mutate(status)}
+              >
+                {label}
+              </Button>
+            ))}
+          </div>
+
+          <div className="flex flex-wrap items-end gap-2">
+            <Select
+              label="Assign analyst"
+              name="assignee"
+              className="min-w-[180px]"
+              value={assignee}
+              onChange={(event) => setAssignee(event.target.value)}
+            >
+              <option value="" disabled>
+                Select a user
+              </option>
+              {(assignableQuery.data ?? []).map((username) => (
+                <option key={username} value={username}>
+                  {username}
+                </option>
+              ))}
+            </Select>
+            <Button
+              onClick={() => assignMutation.mutate()}
+              isLoading={assignMutation.isPending}
+              disabled={!assignee || assignee === incident.assigned_to}
+            >
+              Assign
+            </Button>
+          </div>
+        </>
+      )}
+
+      <form
+        className="flex flex-wrap items-end gap-2"
+        onSubmit={(event) => {
+          event.preventDefault();
+          noteMutation.mutate();
+        }}
+      >
+        <div className="min-w-[200px] flex-1">
+          <Input
+            label="Add investigation note"
+            name="note"
+            value={note}
+            maxLength={2000}
+            onChange={(event) => setNote(event.target.value)}
+            placeholder="What did you find?"
+          />
+        </div>
+        <Button type="submit" variant="outline" isLoading={noteMutation.isPending} disabled={!note.trim()}>
+          Post
+        </Button>
+      </form>
+
+      <div>
+        <h3 className="mb-3 text-sm font-semibold text-text-primary">Timeline</h3>
+        <ol className="space-y-3 border-l border-border pl-4">
+          {incident.investigation_notes.map((entry, index) => (
+            <li key={`${entry.created_at}-${index}`} className="relative">
+              <span className="absolute -left-[1.15rem] top-1.5 h-2 w-2 rounded-full bg-accent-cyan" />
+              <p className="text-sm text-text-primary">{entry.note}</p>
+              <p className="font-data text-2xs text-text-muted">
+                {entry.author} · {formatDateTime(entry.created_at)}
+              </p>
+            </li>
+          ))}
+        </ol>
+      </div>
+    </div>
+  );
+}
+
+export function IncidentManagementPage() {
   const [statusFilter, setStatusFilter] = useState<IncidentStatus | "">("");
   const [selectedRef, setSelectedRef] = useState<string | null>(null);
-  const [note, setNote] = useState("");
-  const [assignTo, setAssignTo] = useState(user?.username ?? "");
 
   const listQuery = useQuery({
     queryKey: ["incidents", "list", statusFilter],
-    queryFn: () =>
-      incidentService.list({
-        status: statusFilter || undefined,
-      }),
+    queryFn: () => incidentService.list({ status: statusFilter || undefined }),
     refetchInterval: 15_000,
   });
 
@@ -44,39 +225,8 @@ export function IncidentManagementPage() {
     enabled: !!selectedRef,
   });
 
-  const invalidate = () => {
-    queryClient.invalidateQueries({ queryKey: ["incidents"] });
-    queryClient.invalidateQueries({ queryKey: ["analytics"] });
-  };
-
-  const statusMutation = useMutation({
-    mutationFn: ({ ref, status, noteText }: { ref: string; status: IncidentStatus; noteText?: string }) =>
-      incidentService.updateStatus(ref, { status, note: noteText }),
-    onSuccess: (inc) => {
-      setSelectedRef(inc.incident_ref);
-      invalidate();
-    },
-  });
-
-  const noteMutation = useMutation({
-    mutationFn: ({ ref, text }: { ref: string; text: string }) =>
-      incidentService.addNote(ref, { note: text }),
-    onSuccess: () => {
-      setNote("");
-      invalidate();
-      queryClient.invalidateQueries({ queryKey: ["incidents", "detail", selectedRef] });
-    },
-  });
-
-  const assignMutation = useMutation({
-    mutationFn: ({ ref, who }: { ref: string; who: string }) => incidentService.assign(ref, who),
-    onSuccess: () => {
-      invalidate();
-      queryClient.invalidateQueries({ queryKey: ["incidents", "detail", selectedRef] });
-    },
-  });
-
-  const selected: IncidentRecord | undefined = detailQuery.data;
+  const incidents = listQuery.data?.incidents ?? [];
+  const selected = detailQuery.data;
 
   return (
     <div className="space-y-6">
@@ -87,23 +237,24 @@ export function IncidentManagementPage() {
             Correlated detections with analyst workflow and investigation timeline.
           </p>
         </div>
-        <select
-          className="h-10 rounded-md border border-border bg-base-800 px-3 text-sm"
+        <Select
+          aria-label="Filter by status"
           value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value as IncidentStatus | "")}
+          onChange={(event) => setStatusFilter(event.target.value as IncidentStatus | "")}
         >
           <option value="">All statuses</option>
-          <option value="OPEN">Open</option>
-          <option value="INVESTIGATING">Investigating</option>
-          <option value="RESOLVED">Resolved</option>
-          <option value="CLOSED">Closed</option>
-        </select>
+          {INCIDENT_STATUSES.map((status) => (
+            <option key={status} value={status}>
+              {status.charAt(0) + status.slice(1).toLowerCase()}
+            </option>
+          ))}
+        </Select>
       </div>
 
       <div className="grid gap-4 lg:grid-cols-5">
         <Card className="lg:col-span-2">
           <CardHeader>
-            <CardTitle>Incidents ({listQuery.data?.count ?? 0})</CardTitle>
+            <CardTitle>Incidents ({incidents.length})</CardTitle>
           </CardHeader>
           <CardBody className="max-h-[640px] space-y-2 overflow-y-auto p-3">
             {listQuery.isLoading && (
@@ -111,31 +262,36 @@ export function IncidentManagementPage() {
                 <Spinner />
               </div>
             )}
-            {(listQuery.data?.incidents ?? []).map((inc) => (
+            {listQuery.isError && (
+              <Notice tone="error">{getErrorMessage(listQuery.error, "Could not load incidents.")}</Notice>
+            )}
+            {incidents.map((incident) => (
               <button
-                key={inc.incident_ref}
+                key={incident.incident_ref}
                 type="button"
-                onClick={() => setSelectedRef(inc.incident_ref)}
+                onClick={() => setSelectedRef(incident.incident_ref)}
                 className={`w-full rounded-md border px-3 py-3 text-left transition-colors ${
-                  selectedRef === inc.incident_ref
+                  selectedRef === incident.incident_ref
                     ? "border-accent-cyan/50 bg-accent-cyan/10"
                     : "border-border bg-base-700/40 hover:border-accent-cyan/30"
                 }`}
               >
                 <div className="flex items-center justify-between gap-2">
-                  <span className="font-data text-sm text-accent-cyan">{inc.incident_ref}</span>
-                  <Badge tone={severityToTone(inc.severity as Severity)} />
+                  <span className="font-data text-sm text-accent-cyan">{incident.incident_ref}</span>
+                  <Badge tone={incident.severity} />
                 </div>
-                <p className="mt-1 text-sm text-text-primary">{inc.threat_type}</p>
+                <p className="mt-1 text-sm text-text-primary">{incident.threat_type}</p>
                 <div className="mt-2 flex items-center justify-between">
-                  <Badge tone={STATUS_TONE[inc.status]}>{inc.status}</Badge>
-                  <span className="font-data text-2xs text-text-muted">{inc.entity.value}</span>
+                  <Badge tone={STATUS_TONE[incident.status]}>{incident.status}</Badge>
+                  <span className="font-data text-2xs text-text-muted">{incident.entity.value}</span>
                 </div>
               </button>
             ))}
-            {!listQuery.isLoading && (listQuery.data?.incidents?.length ?? 0) === 0 && (
+            {listQuery.isSuccess && incidents.length === 0 && (
               <p className="py-8 text-center text-sm text-text-muted">
-                No incidents yet — upload attack sample logs to generate them.
+                {statusFilter
+                  ? "No incidents with this status."
+                  : "No incidents yet — upload logs to generate them."}
               </p>
             )}
           </CardBody>
@@ -148,7 +304,7 @@ export function IncidentManagementPage() {
           <CardBody>
             {!selectedRef && (
               <p className="py-12 text-center text-sm text-text-muted">
-                Choose an incident from the list to view timeline and actions.
+                Choose an incident from the list to view its timeline and actions.
               </p>
             )}
             {selectedRef && detailQuery.isLoading && (
@@ -156,134 +312,11 @@ export function IncidentManagementPage() {
                 <Spinner />
               </div>
             )}
-            {selected && (
-              <div className="space-y-5">
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <div>
-                    <p className="text-2xs uppercase text-text-muted">Threat</p>
-                    <p className="text-sm text-text-primary">{selected.threat_type}</p>
-                  </div>
-                  <div>
-                    <p className="text-2xs uppercase text-text-muted">Entity</p>
-                    <p className="font-data text-sm text-accent-cyan">{selected.entity.value}</p>
-                  </div>
-                  <div>
-                    <p className="text-2xs uppercase text-text-muted">Assigned to</p>
-                    <p className="text-sm text-text-primary">{selected.assigned_to ?? "Unassigned"}</p>
-                  </div>
-                  <div>
-                    <p className="text-2xs uppercase text-text-muted">Status</p>
-                    <Badge tone={STATUS_TONE[selected.status]}>{selected.status}</Badge>
-                  </div>
-                </div>
-
-                <p className="text-sm text-text-secondary">{selected.description}</p>
-
-                <div className="flex flex-wrap gap-2">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={selected.status !== "OPEN"}
-                    isLoading={statusMutation.isPending}
-                    onClick={() =>
-                      statusMutation.mutate({
-                        ref: selected.incident_ref,
-                        status: "INVESTIGATING",
-                        noteText: "Moved to investigating",
-                      })
-                    }
-                  >
-                    Investigate
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={selected.status === "CLOSED" || selected.status === "RESOLVED"}
-                    onClick={() =>
-                      statusMutation.mutate({
-                        ref: selected.incident_ref,
-                        status: "RESOLVED",
-                        noteText: "Marked resolved",
-                      })
-                    }
-                  >
-                    Resolve
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="danger"
-                    disabled={selected.status === "CLOSED"}
-                    onClick={() =>
-                      statusMutation.mutate({
-                        ref: selected.incident_ref,
-                        status: "CLOSED",
-                        noteText: "Incident closed",
-                      })
-                    }
-                  >
-                    Close
-                  </Button>
-                </div>
-
-                <div className="flex flex-wrap items-end gap-2">
-                  <div className="min-w-[160px] flex-1">
-                    <Input
-                      label="Assign analyst"
-                      value={assignTo}
-                      onChange={(e) => setAssignTo(e.target.value)}
-                    />
-                  </div>
-                  <Button
-                    size="sm"
-                    onClick={() =>
-                      assignMutation.mutate({ ref: selected.incident_ref, who: assignTo })
-                    }
-                    isLoading={assignMutation.isPending}
-                    disabled={!assignTo.trim()}
-                  >
-                    Assign
-                  </Button>
-                </div>
-
-                <div className="flex flex-wrap items-end gap-2">
-                  <div className="min-w-[200px] flex-1">
-                    <Input
-                      label="Add comment"
-                      value={note}
-                      onChange={(e) => setNote(e.target.value)}
-                      placeholder="Investigation note…"
-                    />
-                  </div>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() =>
-                      noteMutation.mutate({ ref: selected.incident_ref, text: note })
-                    }
-                    isLoading={noteMutation.isPending}
-                    disabled={!note.trim()}
-                  >
-                    Post
-                  </Button>
-                </div>
-
-                <div>
-                  <h3 className="mb-3 text-sm font-semibold text-text-primary">Timeline</h3>
-                  <ol className="space-y-3 border-l border-border pl-4">
-                    {(selected.investigation_notes ?? []).map((n, idx) => (
-                      <li key={`${n.created_at}-${idx}`} className="relative">
-                        <span className="absolute -left-[1.15rem] top-1.5 h-2 w-2 rounded-full bg-accent-cyan" />
-                        <p className="text-sm text-text-primary">{n.note}</p>
-                        <p className="font-data text-2xs text-text-muted">
-                          {n.author} ·{" "}
-                          {n.created_at ? format(parseISO(n.created_at), "MMM d HH:mm:ss") : ""}
-                        </p>
-                      </li>
-                    ))}
-                  </ol>
-                </div>
-              </div>
+            {selectedRef && detailQuery.isError && (
+              <Notice tone="error">{getErrorMessage(detailQuery.error, "Could not load this incident.")}</Notice>
             )}
+            {/* Keyed by incident so the note/assignee inputs reset when another one is selected. */}
+            {selected && <IncidentDetail key={selected.incident_ref} incident={selected} />}
           </CardBody>
         </Card>
       </div>

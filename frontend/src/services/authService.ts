@@ -1,21 +1,11 @@
 /**
  * src/services/authService.ts
- *
- * Purpose:
- *   Thin wrapper over the real backend auth endpoints
- *   (backend/app/api/v1/auth.py). Unlike incidentService.ts or
- *   analyticsService.ts, this service has NO mock fallback — auth is
- *   fully implemented on the backend (Phase 1), so every function here
- *   always hits the real API.
- *
- * Connects to:
- *   - src/api/client.ts for the underlying HTTP call
- *   - src/features/auth/context/AuthContext.tsx is the only consumer;
- *     components never call this service directly (they use useAuth()).
+ * Session endpoints (backend/app/api/v1/auth.py). Components go through
+ * useAuth() rather than calling this directly.
  */
 import { apiClient } from "@/api/client";
 import { ENDPOINTS } from "@/api/endpoints";
-import type { LoginRequest, TokenResponse, UserPublic } from "@/types";
+import type { ChangePasswordRequest, LoginRequest, TokenResponse, UserPublic } from "@/types";
 
 export const authService = {
   async login(credentials: LoginRequest): Promise<TokenResponse> {
@@ -23,8 +13,19 @@ export const authService = {
     return response.data;
   },
 
+  /** Revokes the refresh token server-side so it is useless after sign-out. */
+  async logout(refreshToken: string): Promise<void> {
+    await apiClient.post(ENDPOINTS.auth.logout, { refresh_token: refreshToken });
+  },
+
   async getCurrentUser(): Promise<UserPublic> {
     const response = await apiClient.get<UserPublic>(ENDPOINTS.auth.me);
+    return response.data;
+  },
+
+  /** Returns a fresh token pair: every token issued before the change stops working. */
+  async changePassword(body: ChangePasswordRequest): Promise<TokenResponse> {
+    const response = await apiClient.post<TokenResponse>(ENDPOINTS.auth.changePassword, body);
     return response.data;
   },
 };

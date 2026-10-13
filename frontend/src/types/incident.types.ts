@@ -1,22 +1,14 @@
 /**
  * src/types/incident.types.ts
- *
- * Purpose:
- *   Mirrors backend/app/models/incident_schema.py exactly, even though
- *   backend/app/api/v1/incidents.py currently returns 501 Not Implemented
- *   for every route (Phase 7 is not built yet — see docs/architecture.md
- *   §2.4 for the planned detection-to-incident correlation design).
- *
- *   Keeping this type file byte-for-byte aligned with the backend schema
- *   now means src/services/incidentService.ts's mock implementation can
- *   be swapped for real fetch calls later with NO changes to any
- *   component that consumes useIncidents()/useIncident() — only the
- *   service layer changes.
+ * Incident documents as returned by backend/app/api/v1/incidents.py
+ * (built by backend/app/incidents/correlator.py).
  */
 import type { Severity } from "./common.types";
 import type { DetectionEntity } from "./detection.types";
 
 export type IncidentStatus = "OPEN" | "INVESTIGATING" | "RESOLVED" | "CLOSED";
+
+export const INCIDENT_STATUSES: readonly IncidentStatus[] = ["OPEN", "INVESTIGATING", "RESOLVED", "CLOSED"];
 
 export interface InvestigationNote {
   author: string;
@@ -29,6 +21,7 @@ export interface IncidentRecord {
   incident_ref: string; // e.g. "INC-1001"
   threat_type: string;
   severity: Severity;
+  mitre_technique?: string | null;
   entity: DetectionEntity;
   status: IncidentStatus;
   detection_ids: string[];
@@ -50,8 +43,4 @@ export interface IncidentListParams {
 export interface IncidentStatusUpdateRequest {
   status: IncidentStatus;
   note?: string;
-}
-
-export interface IncidentNoteRequest {
-  note: string;
 }

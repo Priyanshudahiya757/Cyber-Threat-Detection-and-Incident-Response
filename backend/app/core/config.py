@@ -10,7 +10,7 @@ Purpose:
 Connects to:
     - Imported by db/mongo.py and db/elastic.py for connection strings
     - Imported by core/security.py for JWT secret/expiry
-    - Imported by alerts/* for SMTP and webhook credentials
+    - Imported by alerts/channels.py for SMTP and webhook credentials
     - Imported by main.py for app metadata and CORS origins
 """
 from functools import lru_cache
@@ -23,6 +23,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     # --- App metadata ---
     APP_NAME: str = "Cyber Threat Detection and Incident Response Dashboard"
+    APP_VERSION: str = "1.0.0"
     APP_ENV: str = Field(default="development")  # development | staging | production
     API_V1_PREFIX: str = "/api/v1"
     DEBUG: bool = Field(default=True)
@@ -47,6 +48,17 @@ class Settings(BaseSettings):
     JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(default=60)
     JWT_REFRESH_TOKEN_EXPIRE_DAYS: int = Field(default=7)
 
+    # --- Login brute-force protection ---
+    LOGIN_MAX_FAILED_ATTEMPTS: int = Field(default=5, ge=1)
+    LOGIN_LOCKOUT_MINUTES: int = Field(default=15, ge=1)
+
+    # --- Detection ---
+    # How far back (in event time) already-stored logs are pulled in next to
+    # a freshly ingested batch, so an attack split across uploads is still seen.
+    DETECTION_LOOKBACK_MINUTES: int = Field(default=10, ge=0)
+    # A repeat alert for the same entity + threat is suppressed for this long.
+    ALERT_COOLDOWN_MINUTES: int = Field(default=30, ge=0)
+
     # --- Alerting: Email ---
     SMTP_HOST: str = Field(default="")
     SMTP_PORT: int = Field(default=587)
@@ -62,10 +74,13 @@ class Settings(BaseSettings):
 
     # --- ML model artifacts ---
     ML_MODEL_DIR: str = Field(default="./ml/models")
-    ML_MODEL_VERSION: str = Field(default="v1")
 
-    # --- Rate limiting / ingestion ---
-    MAX_UPLOAD_FILE_SIZE_MB: int = Field(default=25)
+    # --- Ingestion ---
+    MAX_UPLOAD_FILE_SIZE_MB: int = Field(default=25, ge=1)
+
+    @property
+    def max_upload_bytes(self) -> int:
+        return self.MAX_UPLOAD_FILE_SIZE_MB * 1024 * 1024
 
     @model_validator(mode="after")
     def validate_production_settings(self) -> "Settings":

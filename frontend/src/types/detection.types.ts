@@ -1,10 +1,7 @@
 /**
  * src/types/detection.types.ts
- *
- * Purpose:
- *   Mirrors backend/app/models/detection_schema.py and
- *   backend/app/models/alert_schema.py, plus the response shapes of
- *   backend/app/api/v1/detections.py and backend/app/api/v1/ml.py.
+ * Mirrors backend/app/models/detection_schema.py and alert_schema.py,
+ * plus the response shapes of the detections, alerts, rules and ml routers.
  */
 import type { Severity } from "./common.types";
 
@@ -37,6 +34,16 @@ export interface DetectionListResponse {
   count: number;
 }
 
+/** Result of a manual rule re-scan or ML scoring run. Only findings not already stored are counted. */
+export interface DetectionRunResult {
+  logs_scanned: number;
+  detections_found: number;
+  alerts_generated: number;
+  detections: DetectionEvent[];
+}
+
+// --- Alerts (backend/app/api/v1/alerts.py) ---
+
 export interface AlertRecord {
   _id: string;
   title: string;
@@ -46,27 +53,43 @@ export interface AlertRecord {
   detection_id: string;
   mitre_technique: string | null;
   description: string;
-  channel_dispatched: boolean;
+  dispatched_channels?: string[];
+  acknowledged?: boolean;
+  acknowledged_by?: string | null;
   created_at: string;
 }
 
 export interface AlertListResponse {
   alerts: AlertRecord[];
   count: number;
+  unacknowledged_total: number;
 }
 
-export interface DetectionRuleInfo {
+export interface AlertChannelStatus {
+  channel: string;
+  configured: boolean;
+}
+
+export interface AlertChannelResult extends AlertChannelStatus {
+  delivered: boolean;
+  error: string | null;
+}
+
+// --- Detection rules (backend/app/api/v1/rules.py) ---
+
+export type RuleSettingValue = number | string[];
+
+export type RuleSettingSpec =
+  | { type: "integer"; default: number; min: number; max: number }
+  | { type: "string_list"; default: string[] };
+
+export interface DetectionRule {
   rule_name: string;
   description: string;
   mitre_technique: string;
   enabled: boolean;
-}
-
-export interface DetectionRunResult {
-  logs_scanned: number;
-  detections_found: number;
-  alerts_generated: number;
-  detections: DetectionEvent[];
+  config: Record<string, RuleSettingValue>;
+  settings: Record<string, RuleSettingSpec>;
 }
 
 // --- ML / anomaly detection (backend/app/api/v1/ml.py) ---
@@ -78,12 +101,7 @@ export interface ModelMetadata {
   feature_names: string[];
   n_samples: number;
   params: Record<string, number>;
-  metrics: {
-    anomaly_ratio?: number;
-    mean_decision_score?: number;
-    std_decision_score?: number;
-    [key: string]: number | undefined;
-  };
+  metrics: Record<string, number>;
   file: string;
 }
 
@@ -94,13 +112,6 @@ export interface TrainModelResponse {
   n_features: number;
   anomaly_ratio: number;
   entities_flagged_anomalous: string[];
-}
-
-export interface PredictAnomaliesResponse {
-  logs_scanned: number;
-  anomalies_found: number;
-  alerts_generated: number;
-  detections: DetectionEvent[];
 }
 
 export interface EvaluationMetrics {

@@ -8,7 +8,7 @@ Purpose:
 
     Deliberately does NOT attempt to classify SQL injection / XSS /
     directory traversal here — that's threat *detection*, not log
-    *parsing*, and belongs in detection/rules/ (Phase 3) where it can be
+    *parsing*, and belongs in detection/rules/ where it can be
     tuned, tested, and MITRE-mapped independently of ingestion. This
     parser's only job is to extract structured fields (IP, path, status,
     method, user agent) accurately so those rules have something to scan.

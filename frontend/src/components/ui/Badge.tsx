@@ -10,7 +10,9 @@
  */
 import type { HTMLAttributes } from "react";
 import { cn } from "@/lib/cn";
-import type { BadgeTone } from "./badgeUtils";
+import type { Severity } from "@/types";
+
+export type BadgeTone = Severity | "warning" | "info" | "neutral" | "success";
 
 interface BadgeProps extends HTMLAttributes<HTMLSpanElement> {
   tone: BadgeTone;

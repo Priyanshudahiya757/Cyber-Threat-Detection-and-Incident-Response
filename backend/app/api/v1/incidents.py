@@ -10,31 +10,32 @@ Purpose:
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Query, status
-from pydantic import BaseModel, Field
 
 from app.core.dependencies import get_current_user
 from app.incidents import service as incident_service
-from app.models.incident_schema import IncidentNoteCreate, IncidentStatusUpdate
+from app.models.incident_schema import (
+    IncidentAssignRequest,
+    IncidentNoteCreate,
+    IncidentStatus,
+    IncidentStatusUpdate,
+)
+from app.models.log_schema import Severity
 from app.models.user_schema import UserInDB
 
 router = APIRouter(prefix="/incidents", tags=["Incident Management"])
 
 
-class AssignRequest(BaseModel):
-    assigned_to: str = Field(..., min_length=1, max_length=64)
-
-
 @router.get("")
 async def list_incidents(
-    status_filter: Optional[str] = Query(default=None, alias="status"),
-    severity: Optional[str] = None,
+    status_filter: Optional[IncidentStatus] = Query(default=None, alias="status"),
+    severity: Optional[Severity] = None,
     assigned_to: Optional[str] = None,
     limit: int = Query(default=100, ge=1, le=500),
     current_user: UserInDB = Depends(get_current_user),
 ):
     incidents = await incident_service.list_incidents(
         status_filter=status_filter,
-        severity=severity,
+        severity=severity.value if severity else None,
         assigned_to=assigned_to,
         limit=limit,
     )
@@ -67,7 +68,7 @@ async def add_investigation_note(
 @router.patch("/{incident_ref}/assign")
 async def assign_incident(
     incident_ref: str,
-    body: AssignRequest,
+    body: IncidentAssignRequest,
     current_user: UserInDB = Depends(get_current_user),
 ):
     return await incident_service.assign_analyst(

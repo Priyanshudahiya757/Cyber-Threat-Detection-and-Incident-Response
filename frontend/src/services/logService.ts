@@ -1,6 +1,6 @@
 /**
  * src/services/logService.ts
- * Real Axios wrappers for /logs/* endpoints.
+ * Log upload, search and upload history (backend/app/api/v1/logs.py).
  */
 import { apiClient } from "@/api/client";
 import { ENDPOINTS } from "@/api/endpoints";

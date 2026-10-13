@@ -1,26 +1,23 @@
 /**
  * src/services/ruleService.ts
- * Real Axios wrappers for /rules/* admin configuration endpoints.
+ * Detection rule state and settings (backend/app/api/v1/rules.py).
  */
 import { apiClient } from "@/api/client";
 import { ENDPOINTS } from "@/api/endpoints";
-import type { DetectionRuleInfo } from "@/types";
-
-export interface RuleConfigInfo extends DetectionRuleInfo {
-  config?: Record<string, unknown>;
-}
+import type { DetectionRule, RuleSettingValue } from "@/types";
 
 export const ruleService = {
-  async list(): Promise<{ rules: RuleConfigInfo[] }> {
-    const response = await apiClient.get<{ rules: RuleConfigInfo[] }>(ENDPOINTS.rules.list);
-    return response.data;
+  async list(): Promise<DetectionRule[]> {
+    const response = await apiClient.get<{ rules: DetectionRule[] }>(ENDPOINTS.rules.list);
+    return response.data.rules;
   },
 
+  /** Admin-only. Changes apply to the running engine immediately. */
   async update(
     ruleName: string,
-    body: { enabled?: boolean; config?: Record<string, unknown> }
-  ): Promise<RuleConfigInfo> {
-    const response = await apiClient.patch<RuleConfigInfo>(ENDPOINTS.rules.detail(ruleName), body);
+    body: { enabled?: boolean; config?: Record<string, RuleSettingValue> }
+  ): Promise<DetectionRule> {
+    const response = await apiClient.patch<DetectionRule>(ENDPOINTS.rules.detail(ruleName), body);
     return response.data;
   },
 };

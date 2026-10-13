@@ -2,9 +2,8 @@
 app/core/logging_config.py
 
 Purpose:
-    Configures structured logging for the entire backend. A SIEM product
-    that can't reliably log its own operational events is a bad look in a
-    viva, so this sets up:
+    Configures logging for the entire backend. A SIEM has to log its
+    own operational and security events reliably, so this sets up:
       - Console logging (human-readable, dev)
       - Rotating file logging (JSON-ish, for later ingestion/audit)
       - A dedicated "audit" logger for security-relevant app events
@@ -16,6 +15,7 @@ Connects to:
     - `get_logger(__name__)` is used across api/, ingestion/, detection/,
       incidents/, alerts/ instead of raw `logging.getLogger`.
 """
+import json
 import logging
 import logging.handlers
 import os
@@ -25,7 +25,7 @@ LOG_DIR = os.getenv("LOG_DIR", "./logs")
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 
 _CONSOLE_FORMAT = "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s"
-_AUDIT_FORMAT = '{"time": "%(asctime)s", "logger": "%(name)s", "event": %(message)s}'
+_AUDIT_FORMAT = '{"time": "%(asctime)s", "audit": %(message)s}'
 
 
 def setup_logging() -> None:
@@ -45,6 +45,10 @@ def setup_logging() -> None:
     app_file_handler.setFormatter(logging.Formatter(_CONSOLE_FORMAT))
     root.addHandler(app_file_handler)
 
+    # The Elasticsearch transport logs every request at INFO, which drowns
+    # out the application's own messages.
+    logging.getLogger("elastic_transport").setLevel(logging.WARNING)
+
     # Dedicated audit trail: auth events, role/permission changes,
     # incident status transitions. Kept separate so it can be shipped
     # to the SIEM's own log pipeline later ("eating our own dog food").
@@ -63,5 +67,10 @@ def get_logger(name: str) -> logging.Logger:
     return logging.getLogger(name)
 
 
-def get_audit_logger() -> logging.Logger:
-    return logging.getLogger("audit")
+def audit_event(event: str, **fields: object) -> None:
+    """
+    Write one security-relevant event to the audit trail. Fields are
+    JSON-encoded here, so user-controlled values (usernames, notes) can
+    never break out of their field or forge additional ones.
+    """
+    logging.getLogger("audit").info(json.dumps({"event": event, **fields}, default=str))

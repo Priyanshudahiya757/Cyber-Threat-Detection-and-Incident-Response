@@ -217,7 +217,7 @@ class TestWebServerLogParser:
 class TestSampleLogFixtures:
     """
     Sanity-check each parser against the real fixture files in
-    sample_logs/, which is what a demo/viva would actually upload.
+    sample_logs/, which is what the demo seed script uploads.
     Confirms parsers handle full multi-line files, not just single lines.
     """
 

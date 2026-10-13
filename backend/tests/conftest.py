@@ -2,29 +2,28 @@
 tests/conftest.py
 
 Purpose:
-    Shared pytest fixtures. Uses mongomock-motor to fake MongoDB in tests
-    so the test suite never touches a real database — fast, and safe to
-    run in CI without spinning up Docker.
+    Shared pytest fixtures. `mock_db` swaps the real MongoDB for an
+    in-memory mongomock-motor instance so tests never need a running
+    database; `client` gives an httpx AsyncClient bound to the FastAPI
+    app. Elasticsearch is not faked wholesale — tests that touch it
+    monkeypatch the specific db/elastic.py functions they need.
 
-    Elasticsearch is not mocked here (Phase 1); ingestion/detection tests
-    added in later phases should mock db/elastic.py functions directly at
-    the function level rather than standing up a fake ES.
+    `auth_headers` creates a user of the requested role and returns the
+    Authorization header for it, which keeps API tests short.
 """
-import asyncio
-
-import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from mongomock_motor import AsyncMongoMockClient
 
+from app.core.security import create_access_token, hash_password
 from app.db import mongo as mongo_module
+
+TEST_PASSWORD = "SecurePass123!"
 
 
 @pytest_asyncio.fixture
 async def mock_db(monkeypatch):
-    fake_client = AsyncMongoMockClient()
-    fake_db = fake_client["siem_dashboard_test"]
-
+    fake_db = AsyncMongoMockClient()["siem_dashboard_test"]
     monkeypatch.setattr(mongo_module, "_db", fake_db)
     await mongo_module.ensure_indexes()
     return fake_db
@@ -34,6 +33,22 @@ async def mock_db(monkeypatch):
 async def client(mock_db):
     from app.main import app
 
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         yield ac
+
+
+@pytest_asyncio.fixture
+async def auth_headers(mock_db):
+    """Factory: `await auth_headers("admin")` -> headers for a freshly created user of that role."""
+
+    async def _make(role: str = "soc_analyst", username: str | None = None) -> dict:
+        username = username or f"{role}_user"
+        await mongo_module.create_user(
+            username=username,
+            email=f"{username}@example.com",
+            hashed_password=hash_password(TEST_PASSWORD),
+            role=role,
+        )
+        return {"Authorization": f"Bearer {create_access_token(subject=username, role=role)}"}
+
+    return _make

@@ -2,22 +2,20 @@
 app/models/alert_schema.py
 
 Purpose:
-    In-application alert record. When the detection engine (rule-based or
-    ML) produces a DetectionEvent at or above ALERT_SEVERITY_THRESHOLD,
-    an Alert is created and persisted — this is the "generate alerts
-    automatically" requirement for Phase 3/4. External channel dispatch
-    (email/Discord/Telegram) is a separate concern (Phase 8 per the
-    original roadmap) and is intentionally NOT implemented here; this
-    schema and its `channel_dispatched` flag are what that future phase
-    will consume, so the integration seam already exists.
+    In-application alert record. When either detection engine produces a
+    DetectionEvent at or above the alerting severity threshold, an Alert
+    is created, persisted, and handed to alerts/dispatcher.py for delivery
+    to whichever external channels (email / Discord / Telegram) are
+    configured.
 
 Connects to:
-    - detection/alerting.py creates these from DetectionEvent/Incident data
+    - detection/alerting.py creates these from DetectionEvents
     - db/mongo.py persists them in the `alerts` collection
-    - api/v1/detections.py exposes read endpoints
+    - alerts/dispatcher.py records which channels delivered each alert
+    - api/v1/alerts.py exposes list / acknowledge endpoints
 """
 from datetime import datetime, timezone
-from typing import Optional
+from typing import List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -25,7 +23,8 @@ from app.models.detection_schema import Entity
 from app.models.log_schema import Severity
 
 
-class AlertCreate(BaseModel):
+class Alert(BaseModel):
+    id: Optional[str] = Field(default=None, alias="_id")
     title: str
     threat_type: str
     severity: Severity
@@ -34,12 +33,12 @@ class AlertCreate(BaseModel):
     mitre_technique: Optional[str] = None
     description: str
 
-
-class AlertInDB(AlertCreate):
-    id: str = Field(..., alias="_id")
-    channel_dispatched: bool = Field(
-        default=False, description="Whether this alert has been sent to an external channel (Phase 8)."
+    dispatched_channels: List[str] = Field(
+        default_factory=list, description="External channels this alert was delivered to."
     )
+    acknowledged: bool = False
+    acknowledged_by: Optional[str] = None
+    acknowledged_at: Optional[datetime] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     model_config = {"populate_by_name": True, "use_enum_values": True}

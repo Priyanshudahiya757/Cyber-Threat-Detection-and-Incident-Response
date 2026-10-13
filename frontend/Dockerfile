@@ -1,16 +1,18 @@
-FROM node:22-slim
+# --- Build the static site ---
+FROM node:22-slim AS build
 
 WORKDIR /app
 
 COPY package*.json ./
-RUN npm install
+RUN npm ci
 
 COPY . .
+RUN npm run build
 
-EXPOSE 5173
+# --- Serve it with nginx, which also proxies /api to the backend ---
+FROM nginx:1.27-alpine
 
-# Dev-mode container (matches the rest of this project's docker-compose
-# setup, which favors live-reload over a production nginx/static build).
-# A production image would instead run `npm run build` and serve dist/
-# via nginx — worth revisiting once the frontend is feature-complete.
-CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0"]
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+COPY --from=build /app/dist /usr/share/nginx/html
+
+EXPOSE 80

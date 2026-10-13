@@ -3,8 +3,10 @@ services:
     image: mongo:7
     container_name: siem-mongo
     restart: unless-stopped
+    # Databases run without authentication, so they are published on
+    # localhost only — never on the machine's network interfaces.
     ports:
-      - "27017:27017"
+      - "127.0.0.1:27017:27017"
     volumes:
       - mongo_data:/data/db
     healthcheck:
@@ -22,7 +24,7 @@ services:
       - xpack.security.enabled=false
       - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
     ports:
-      - "9200:9200"
+      - "127.0.0.1:9200:9200"
     volumes:
       - es_data:/usr/share/elasticsearch/data
     healthcheck:
@@ -31,16 +33,17 @@ services:
       timeout: 5s
       retries: 10
 
-  # Optional: for manually inspecting Elasticsearch indices during development.
-  # Not required for the app to function — comment out if resources are tight.
+  # Optional, for inspecting Elasticsearch indices by hand. Not started by
+  # default; run `docker compose --profile tools up -d` to include it.
   kibana:
     image: docker.elastic.co/kibana/kibana:8.15.0
     container_name: siem-kibana
+    profiles: ["tools"]
     restart: unless-stopped
     environment:
       - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
     ports:
-      - "5601:5601"
+      - "127.0.0.1:5601:5601"
     depends_on:
       elasticsearch:
         condition: service_healthy
@@ -56,10 +59,12 @@ services:
       - ELASTIC_HOST=http://elasticsearch:9200
       - APP_ENV=production
       - DEBUG=false
+      - ML_MODEL_DIR=/app/ml/models
+    # Published for the interactive API docs (http://localhost:8000/docs).
+    # The web app itself reaches the API through the frontend's /api proxy.
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     volumes:
-      - ./backend:/app
       - ./ml/models:/app/ml/models
       - ./ml/datasets:/ml/datasets:ro
       - ./elasticsearch:/elasticsearch:ro
@@ -75,16 +80,10 @@ services:
     container_name: siem-frontend
     restart: unless-stopped
     ports:
-      - "5173:5173"
-    environment:
-      - VITE_API_BASE_URL=/api/v1
-      - VITE_BACKEND_ORIGIN=http://backend:8000
-      - VITE_USE_MOCKS_FOR_UNIMPLEMENTED=false
-    volumes:
-      - ./frontend:/app
-      - /app/node_modules
+      - "5173:80"
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
 
 volumes:
   mongo_data:

@@ -18,8 +18,8 @@ Purpose:
     importing detection/analytics logic directly. This keeps ingestion
     decoupled from detection (Dependency Inversion — the pipeline depends
     on an abstract callback, not on the concrete rule engine), and the
-    `on_ingested` hook is what Phase 3 wires up to trigger detection
-    automatically after new logs land — see app/main.py for the wiring.
+    `on_ingested` hook is what triggers detection automatically after
+    new logs land — see app/main.py for the wiring.
 
 Connects to:
     - api/v1/logs.py calls IngestionPipeline.process()
@@ -84,7 +84,7 @@ class IngestionPipeline:
     def register_on_ingested_callback(self, callback: OnIngestedCallback) -> None:
         """
         Registers the post-ingestion hook. Called once from app/main.py at
-        startup to wire up the detection engine (Phase 3) without
+        startup to wire up detection (detection/service.py) without
         ingestion importing detection directly (Dependency Inversion).
         """
         self._on_ingested = callback

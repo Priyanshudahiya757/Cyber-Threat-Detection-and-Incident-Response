@@ -80,8 +80,7 @@ class IngestionBatch(BaseModel):
     Metadata record for a single ingestion request (file upload or JSON
     ingest), persisted in MongoDB's `ingestion_batches` collection. This
     is the audit trail answering "when was this data ingested, by whom,
-    from what, and with what outcome" — useful both for the SOC dashboard
-    and for a B.Tech viva demo of the ingestion pipeline's traceability.
+    from what, and with what outcome".
     """
     batch_id: str
     source_type: SourceType

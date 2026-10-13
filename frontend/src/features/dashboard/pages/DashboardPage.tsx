@@ -18,6 +18,7 @@ import {
   BarChart,
   CartesianGrid,
   Cell,
+  Legend,
   Pie,
   PieChart,
   ResponsiveContainer,
@@ -25,13 +26,9 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { format, parseISO } from "date-fns";
 import { analyticsService } from "@/services/analyticsService";
-import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/Card";
-import { Badge } from "@/components/ui/Badge";
-import { severityToTone } from "@/components/ui/badgeUtils";
-import { Spinner } from "@/components/ui/Spinner";
-import type { Severity } from "@/types";
+import { formatDateTime, formatHour, humanize } from "@/lib/format";
+import { Badge, Card, CardBody, CardHeader, CardTitle, Spinner } from "@/components/ui";
 
 const SEVERITY_COLORS: Record<string, string> = {
   low: "#3B82F6",
@@ -126,19 +123,19 @@ export function DashboardPage() {
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
         <StatCard
-          label="Total Logs"
+          label="Logs (24h)"
           value={summary?.total_logs ?? 0}
           icon={Activity}
           accent="bg-accent-cyan/10 text-accent-cyan"
         />
         <StatCard
-          label="Threats"
+          label="Detections"
           value={summary?.threats_detected ?? 0}
           icon={ShieldAlert}
           accent="bg-severity-warning-dim text-severity-warning"
         />
         <StatCard
-          label="Incidents"
+          label="Active Incidents"
           value={summary?.active_incidents ?? 0}
           icon={FileWarning}
           accent="bg-accent-blue/10 text-accent-blue"
@@ -174,20 +171,14 @@ export function DashboardPage() {
                 <CartesianGrid stroke="#232C3F" strokeDasharray="3 3" />
                 <XAxis
                   dataKey="timestamp"
-                  tickFormatter={(v) => {
-                    try {
-                      return format(parseISO(v), "HH:mm");
-                    } catch {
-                      return v;
-                    }
-                  }}
+                  tickFormatter={formatHour}
                   stroke="#5B6478"
                   fontSize={11}
                 />
                 <YAxis stroke="#5B6478" fontSize={11} allowDecimals={false} />
                 <Tooltip
                   contentStyle={{ background: "#111827", border: "1px solid #232C3F" }}
-                  labelFormatter={(v) => String(v)}
+                  labelFormatter={(value) => formatDateTime(String(value))}
                 />
                 <Area type="monotone" dataKey="count" stroke="#22D3EE" fill="url(#threatFill)" />
               </AreaChart>
@@ -197,7 +188,7 @@ export function DashboardPage() {
 
         <Card>
           <CardHeader>
-            <CardTitle>Severity Distribution</CardTitle>
+            <CardTitle>Log Severity (24h)</CardTitle>
           </CardHeader>
           <CardBody className="h-64">
             <ResponsiveContainer width="100%" height="100%">
@@ -208,6 +199,7 @@ export function DashboardPage() {
                   ))}
                 </Pie>
                 <Tooltip contentStyle={{ background: "#111827", border: "1px solid #232C3F" }} />
+                <Legend formatter={(value) => humanize(String(value))} />
               </PieChart>
             </ResponsiveContainer>
           </CardBody>
@@ -215,7 +207,7 @@ export function DashboardPage() {
 
         <Card>
           <CardHeader>
-            <CardTitle>Attack Types</CardTitle>
+            <CardTitle>Detections by Type</CardTitle>
           </CardHeader>
           <CardBody className="h-64">
             <ResponsiveContainer width="100%" height="100%">
@@ -238,7 +230,7 @@ export function DashboardPage() {
 
         <Card>
           <CardHeader>
-            <CardTitle>Top Source IPs</CardTitle>
+            <CardTitle>Most Active Source IPs (24h)</CardTitle>
           </CardHeader>
           <CardBody>
             <ul className="space-y-2">
@@ -270,7 +262,7 @@ export function DashboardPage() {
           <table className="w-full min-w-[640px] text-left text-sm">
             <thead className="text-2xs uppercase text-text-muted">
               <tr>
-                <th className="pb-3 pr-4">Time</th>
+                <th className="pb-3 pr-4">Detected</th>
                 <th className="pb-3 pr-4">Engine</th>
                 <th className="pb-3 pr-4">Threat</th>
                 <th className="pb-3 pr-4">Entity</th>
@@ -281,18 +273,20 @@ export function DashboardPage() {
             <tbody className="divide-y divide-border">
               {(recent?.events ?? []).map((ev) => (
                 <tr key={ev.detection_id}>
-                  <td className="py-3 pr-4 font-data text-text-secondary">
-                    {ev.timestamp ? format(parseISO(ev.timestamp), "HH:mm:ss") : "—"}
+                  <td className="whitespace-nowrap py-3 pr-4 font-data text-text-secondary">
+                    {formatDateTime(ev.timestamp)}
                   </td>
                   <td className="py-3 pr-4 uppercase text-text-secondary">{ev.engine}</td>
                   <td className="py-3 pr-4 text-text-primary">
-                    {ev.rule_name?.replace(/_/g, " ") ?? "AI Anomaly"}
+                    {ev.rule_name ? humanize(ev.rule_name) : "AI Anomaly"}
                   </td>
                   <td className="py-3 pr-4 font-data text-accent-cyan">{ev.entity?.value}</td>
                   <td className="py-3 pr-4">
-                    <Badge tone={severityToTone(ev.severity as Severity)} />
+                    <Badge tone={ev.severity} />
                   </td>
-                  <td className="max-w-xs truncate py-3 text-text-secondary">{ev.explanation}</td>
+                  <td className="max-w-xs truncate py-3 text-text-secondary" title={ev.explanation}>
+                    {ev.explanation}
+                  </td>
                 </tr>
               ))}
             </tbody>

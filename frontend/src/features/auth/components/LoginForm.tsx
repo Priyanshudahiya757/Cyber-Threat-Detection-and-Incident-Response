@@ -110,6 +110,7 @@ function getErrorMessage(error: unknown): string | null {
   if (isAxiosError(error)) {
     if (error.response?.status === 401) return "Incorrect username or password.";
     if (error.response?.status === 403) return "This account is disabled.";
+    if (error.response?.status === 429) return "Too many failed attempts. This account is locked for a few minutes.";
     if (!error.response) return "Can't reach the server. Check that the backend is running.";
     return error.response.data?.detail ?? "Sign in failed. Please try again.";
   }

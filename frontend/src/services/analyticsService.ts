@@ -1,6 +1,6 @@
 /**
  * src/services/analyticsService.ts
- * Real Axios wrappers for /analytics/* dashboard endpoints.
+ * Dashboard and analytics aggregations (backend/app/api/v1/analytics.py).
  */
 import { apiClient } from "@/api/client";
 import { ENDPOINTS } from "@/api/endpoints";
