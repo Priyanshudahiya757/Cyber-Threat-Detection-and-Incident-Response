@@ -1,0 +1,34 @@
+{
+  "_comment": "Index template for security-logs-*. Must stay in sync with app/models/log_schema.py::NormalizedLog. Applied automatically via db/elastic.py::_ensure_index_template() at backend startup.",
+  "settings": {
+    "number_of_shards": 1,
+    "number_of_replicas": 0,
+    "index.mapping.total_fields.limit": 2000
+  },
+  "mappings": {
+    "properties": {
+      "log_id": { "type": "keyword" },
+      "source_type": { "type": "keyword" },
+      "source_host": { "type": "keyword" },
+      "event_category": { "type": "keyword" },
+      "event_type": { "type": "keyword" },
+      "severity": { "type": "keyword" },
+
+      "user": { "type": "keyword" },
+      "source_ip": { "type": "ip" },
+      "dest_ip": { "type": "ip" },
+      "dest_port": { "type": "integer" },
+
+      "raw_log": {
+        "type": "text",
+        "fields": {
+          "keyword": { "type": "keyword", "ignore_above": 1024 }
+        }
+      },
+      "parsed_fields": { "type": "object", "enabled": true, "dynamic": true },
+
+      "timestamp": { "type": "date" },
+      "ingested_at": { "type": "date" }
+    }
+  }
+}

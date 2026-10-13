@@ -1,0 +1,91 @@
+services:
+  mongo:
+    image: mongo:7
+    container_name: siem-mongo
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.15.0
+    container_name: siem-elasticsearch
+    restart: unless-stopped
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    ports:
+      - "9200:9200"
+    volumes:
+      - es_data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s http://localhost:9200/_cluster/health | grep -q '\"status\"'"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # Optional: for manually inspecting Elasticsearch indices during development.
+  # Not required for the app to function — comment out if resources are tight.
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.15.0
+    container_name: siem-kibana
+    restart: unless-stopped
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+    ports:
+      - "5601:5601"
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+
+  backend:
+    build: ./backend
+    container_name: siem-backend
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env
+    environment:
+      - MONGO_URI=mongodb://mongo:27017
+      - ELASTIC_HOST=http://elasticsearch:9200
+      - APP_ENV=production
+      - DEBUG=false
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app
+      - ./ml/models:/app/ml/models
+      - ./ml/datasets:/ml/datasets:ro
+      - ./elasticsearch:/elasticsearch:ro
+      - ./sample_logs:/sample_logs:ro
+    depends_on:
+      mongo:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+
+  frontend:
+    build: ./frontend
+    container_name: siem-frontend
+    restart: unless-stopped
+    ports:
+      - "5173:5173"
+    environment:
+      - VITE_API_BASE_URL=/api/v1
+      - VITE_BACKEND_ORIGIN=http://backend:8000
+      - VITE_USE_MOCKS_FOR_UNIMPLEMENTED=false
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    depends_on:
+      - backend
+
+volumes:
+  mongo_data:
+  es_data:

@@ -1,0 +1,64 @@
+[
+  {
+    "EventID": 4625,
+    "TimeCreated": "2026-07-19T09:40:11Z",
+    "Computer": "DC01.corp.local",
+    "Channel": "Security",
+    "Message": "An account failed to log on.",
+    "TargetUserName": "Administrator",
+    "IpAddress": "203.0.113.44",
+    "LogonType": 3,
+    "FailureReason": "Unknown user name or bad password"
+  },
+  {
+    "EventID": 4625,
+    "TimeCreated": "2026-07-19T09:40:14Z",
+    "Computer": "DC01.corp.local",
+    "Channel": "Security",
+    "Message": "An account failed to log on.",
+    "TargetUserName": "Administrator",
+    "IpAddress": "203.0.113.44",
+    "LogonType": 3,
+    "FailureReason": "Unknown user name or bad password"
+  },
+  {
+    "EventID": 4625,
+    "TimeCreated": "2026-07-19T09:40:17Z",
+    "Computer": "DC01.corp.local",
+    "Channel": "Security",
+    "Message": "An account failed to log on.",
+    "TargetUserName": "Administrator",
+    "IpAddress": "203.0.113.44",
+    "LogonType": 3,
+    "FailureReason": "Unknown user name or bad password"
+  },
+  {
+    "EventID": 4624,
+    "TimeCreated": "2026-07-19T09:41:02Z",
+    "Computer": "DC01.corp.local",
+    "Channel": "Security",
+    "Message": "An account was successfully logged on.",
+    "TargetUserName": "jsmith",
+    "IpAddress": "10.0.0.12",
+    "LogonType": 2
+  },
+  {
+    "EventID": 4720,
+    "TimeCreated": "2026-07-19T09:52:30Z",
+    "Computer": "DC01.corp.local",
+    "Channel": "Security",
+    "Message": "A user account was created.",
+    "TargetUserName": "svc_backup",
+    "SubjectUserName": "jsmith"
+  },
+  {
+    "EventID": 4672,
+    "TimeCreated": "2026-07-19T02:15:09Z",
+    "Computer": "DC01.corp.local",
+    "Channel": "Security",
+    "Message": "Special privileges assigned to new logon.",
+    "TargetUserName": "svc_backup",
+    "IpAddress": "10.0.0.12",
+    "LogonType": 2
+  }
+]

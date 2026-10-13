@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+.venv/
+venv/
+
+# Env files
+.env
+!.env.example
+
+# Logs
+backend/logs/
+*.log
+
+# ML artifacts (large binaries, don't commit)
+ml/models/*.pkl
+
+# Node / frontend (Phase 3+)
+node_modules/
+frontend/dist/
+**/dist/
+**/*.tsbuildinfo
+**/vite.config.js
+frontend/.env
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/

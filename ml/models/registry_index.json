@@ -1,0 +1,83 @@
+[
+  {
+    "model_type": "isolation_forest",
+    "version": "v1",
+    "trained_at": "2026-07-19T16:57:44.563310+00:00",
+    "feature_names": [
+      "failed_login_count",
+      "successful_login_count",
+      "total_event_count",
+      "distinct_event_types",
+      "distinct_dest_ports",
+      "distinct_dest_ips",
+      "avg_response_size_bytes",
+      "off_hours_event_ratio"
+    ],
+    "n_samples": 11,
+    "params": {
+      "n_estimators": 100,
+      "contamination": 0.05,
+      "random_state": 42
+    },
+    "metrics": {
+      "anomaly_ratio": 0.09090909090909091,
+      "mean_decision_score": 0.13280355032023075,
+      "std_decision_score": 0.08280295460775057
+    },
+    "file": "isolation_forest_v1.joblib"
+  },
+  {
+    "model_type": "isolation_forest",
+    "version": "v2",
+    "trained_at": "2026-07-19T19:44:35.707653+00:00",
+    "feature_names": [
+      "failed_login_count",
+      "successful_login_count",
+      "total_event_count",
+      "distinct_event_types",
+      "distinct_dest_ports",
+      "distinct_dest_ips",
+      "avg_response_size_bytes",
+      "off_hours_event_ratio"
+    ],
+    "n_samples": 11,
+    "params": {
+      "n_estimators": 100,
+      "contamination": 0.05,
+      "random_state": 42
+    },
+    "metrics": {
+      "anomaly_ratio": 0.09090909090909091,
+      "mean_decision_score": 0.13280355032023078,
+      "std_decision_score": 0.08280295460775056
+    },
+    "file": "isolation_forest_v2.joblib"
+  },
+  {
+    "model_type": "isolation_forest",
+    "version": "v3",
+    "trained_at": "2026-07-22T08:19:40.644993+00:00",
+    "feature_names": [
+      "failed_login_count",
+      "successful_login_count",
+      "total_event_count",
+      "distinct_event_types",
+      "distinct_dest_ports",
+      "distinct_dest_ips",
+      "avg_response_size_bytes",
+      "off_hours_event_ratio"
+    ],
+    "n_samples": 12,
+    "params": {
+      "n_estimators": 100,
+      "contamination": 0.05,
+      "random_state": 42
+    },
+    "metrics": {
+      "anomaly_ratio": 0.08333333333333333,
+      "mean_decision_score": 0.12574368663995605,
+      "std_decision_score": 0.08018739809194331
+    },
+    "file": "isolation_forest_v3.joblib"
+  }
+]
