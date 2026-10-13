@@ -12,6 +12,7 @@ export default defineConfig({
   },
   server: {
     port: 5173,
+    allowedHosts: [".trycloudflare.com"],
     proxy: {
       // Lets the frontend call relative /api/v1/... paths in dev without
       // CORS friction; production instead sets VITE_API_BASE_URL directly
